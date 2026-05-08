@@ -58,6 +58,10 @@ class FlightService {
 		$this->mapper->delete($flight);
 	}
 
+	public function deleteAll(string $userId): int {
+		return $this->mapper->deleteAllForUser($userId);
+	}
+
 	private function validate(array $data): void {
 		$date = $this->str($data, 'flightDate');
 		if ($date === null) {

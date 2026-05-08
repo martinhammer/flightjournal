@@ -78,7 +78,7 @@ Keyed on `(flight_id, provider, kind)` with a JSON `payload` blob and `fetched_a
 
 - Distances always stored in km; UI converts based on user pref.
 - Reference-data lookups: never block flight saves on upstream availability; treat all enrichment as optional.
-- API responses: OCS envelope (use `OCSController` + `DataResponse`). Use `generateOcsUrl` on the frontend.
+- API responses: OCS envelope (use `OCSController` + `DataResponse`). Use `generateOcsUrl` on the frontend, and append `?format=json` to every OCS URL — without it NC OCS replies in XML even when `Accept: application/json` is set. Also avoid using `format` as a controller parameter name; OCS reserves it for response-format selection and a body/query `format` value will override the response format. Use a descriptive non-reserved name like `dataformat`.
 - User-scoping is enforced server-side in services/mappers; never trust a `user_id` from the client.
 - Free APIs preferred for enrichment; admin settings screen will hold optional API keys/tokens.
 - **All UI elements must come from the Nextcloud toolkit** (`@nextcloud/vue` components, `@nextcloud/dialogs` for toasts/confirmations/modals). Never use raw browser primitives like `confirm()`, `alert()`, `prompt()`, or unstyled `<input>`/`<button>`.

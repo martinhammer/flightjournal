@@ -2,7 +2,10 @@ import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
 import { Flight, FlightInput } from './types.ts'
 
-const url = (path: string) => generateOcsUrl('apps/flightjournal' + path)
+const url = (path: string) => {
+	const base = generateOcsUrl('apps/flightjournal' + path)
+	return base.includes('?') ? `${base}&format=json` : `${base}?format=json`
+}
 
 const config = {
 	headers: {

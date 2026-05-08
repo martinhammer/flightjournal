@@ -31,6 +31,13 @@ class FlightMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	public function deleteAllForUser(string $userId): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)));
+		return $qb->executeStatement();
+	}
+
 	/**
 	 * @throws DoesNotExistException
 	 */
