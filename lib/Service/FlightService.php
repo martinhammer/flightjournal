@@ -69,8 +69,11 @@ class FlightService {
 
 		$hasOrigin = $this->str($data, 'originCode') !== null || $this->str($data, 'originLabel') !== null;
 		$hasDestination = $this->str($data, 'destinationCode') !== null || $this->str($data, 'destinationLabel') !== null;
-		if (!$hasOrigin && !$hasDestination) {
-			throw new ValidationException('At least one of origin or destination is required');
+		if (!$hasOrigin) {
+			throw new ValidationException('Origin is required');
+		}
+		if (!$hasDestination) {
+			throw new ValidationException('Destination is required');
 		}
 
 		$cabin = $this->str($data, 'cabinClass');

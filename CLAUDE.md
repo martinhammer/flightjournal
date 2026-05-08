@@ -50,9 +50,11 @@ Standard Nextcloud app shape. Backend in `lib/` (PHP 8.1+, AppFramework, no Doct
 
 Indexes: `(user_id, flight_date)`, `(user_id, airline_code)`, `(user_id, aircraft_type_code)`.
 
-**Validation:** date required; at least one of origin or destination required (code OR label). Everything else optional.
+**Validation:** date, origin, and destination are all required (origin/destination satisfied by either `_code` or `_label`). Everything else optional.
 
 **No FKs to reference tables** — flights remain valid even if reference data is missing or stale. This is a hard design principle: the app must be fully usable without enrichment.
+
+**Origin/destination UX:** the Add and Edit screens expose a single "Origin" / "Destination" text field each, written into `origin_label` / `destination_label`. The `origin_code` / `destination_code` columns are populated only by a future backend enrichment step (on save/edit/scheduled job) that recognises an entered string as an IATA/ICAO code and promotes it. UI display prefers `_label`, falling back to `_code` when only the code is present.
 
 ### Reference (instance-wide, no `user_id`)
 
@@ -79,6 +81,7 @@ Keyed on `(flight_id, provider, kind)` with a JSON `payload` blob and `fetched_a
 - API responses: OCS envelope (use `OCSController` + `DataResponse`). Use `generateOcsUrl` on the frontend.
 - User-scoping is enforced server-side in services/mappers; never trust a `user_id` from the client.
 - Free APIs preferred for enrichment; admin settings screen will hold optional API keys/tokens.
+- **All UI elements must come from the Nextcloud toolkit** (`@nextcloud/vue` components, `@nextcloud/dialogs` for toasts/confirmations/modals). Never use raw browser primitives like `confirm()`, `alert()`, `prompt()`, or unstyled `<input>`/`<button>`.
 
 ## Iteration roadmap
 
