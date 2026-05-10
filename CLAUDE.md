@@ -119,3 +119,17 @@ Reference data seeding/autocomplete, map, analytics, enrichment, import/export, 
 
 - `vite.config.ts` references `src/main.js` but the file is `src/main.ts` — needs fixing when SPA shell lands.
 - `composer.json` pins `nextcloud/ocp: dev-stable31` — keep in sync with `appinfo/info.xml` `min-version`.
+
+## PHPUnit tests — to revisit
+
+Initial unit coverage lives under `tests/unit/Service/` (`FlightServiceTest`, `ImportServiceTest`). Wired up via `tests/phpunit.xml` and runnable through `composer test:unit` / `make test`. `tests/bootstrap.php` registers a PSR-4 prefix for `nextcloud/ocp` because that package ships stubs without its own autoloader — revisit if the OCP package starts autoloading itself or if tests start needing a real Nextcloud server bootstrap.
+
+Still missing and worth adding once the API surface settles past Milestone 1:
+
+- `Service/ExportService` — small, smoke test only.
+- `Controller/FlightApiController` and `Controller/SettingsApiController` — happy-path + error-path per endpoint.
+- Integration-style tests for `Db/FlightMapper` and migrations (need a real DB; currently out of scope for unit tests).
+
+Bugs surfaced while writing the tests (pinned by current tests, not yet fixed):
+
+- `ImportService::splitFlightNumber` — the regex `^([A-Z0-9]{2,3})\s*(\d+)$` is greedy on the prefix, so `SK4745` splits as `SK4`/`745` and `W61383` as `W61`/`383`. The intent was a 2-letter airline + the rest as flight number. Tests currently encode the buggy behaviour — fix the regex (likely make the prefix non-greedy or anchor on letters first) and update the assertions together.
