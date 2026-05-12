@@ -17,6 +17,8 @@
 	<settings>
 		<personal>OCA\FlightJournal\Settings\Personal</personal>
 		<personal-section>OCA\FlightJournal\Settings\PersonalSection</personal-section>
+		<admin>OCA\FlightJournal\Settings\Admin</admin>
+		<admin-section>OCA\FlightJournal\Settings\AdminSection</admin-section>
 	</settings>
 	<navigations>
 		<navigation>

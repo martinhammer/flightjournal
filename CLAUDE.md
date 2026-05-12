@@ -58,7 +58,7 @@ Indexes: `(user_id, flight_date)`, `(user_id, airline_code)`, `(user_id, aircraf
 
 ### Reference (instance-wide, no `user_id`)
 
-- `flightjournal_airports` — `iata`, `icao`, `name`, `city`, `country_iso2`, `lat`, `lon`, `tz`, `source`, `updated_at`.
+- `flightjournal_airports` — `iata`, `icao`, `name`, `city`, `state`, `country_iso2`, `lat`, `lon`, `elevation` (feet, integer), `tz`, `source`, `updated_at`.
 - `flightjournal_aircraft_types` — `icao_code` (PK), `iata_code`, `manufacturer`, `model`, `variant`, `engine_type`.
 - `flightjournal_airlines` — `iata`, `icao`, `name`, `country_iso2`, `active`.
 
@@ -112,6 +112,11 @@ Install on NC 31, navigate to Flight Journal, create a flight via the Edit form,
 - [x] Personal settings Vue mount — placeholder.
 
 Milestone 1 is complete: code implemented and verified end-to-end against NC 31 per the DoD above.
+
+### Post-M1 additions already landed
+
+- **Admin settings page** (`Settings/Admin` + `Settings/AdminSection`, mounted via `src/adminSettings.ts` → `views/AdminSettings.vue`) for managing instance-wide reference data.
+- **Airport reference import/delete**: `Db/Airport` + `AirportMapper`, `Service/AirportImportService` (JSON keyed by ICAO, upsert semantics), `Controller/AirportAdminApiController` exposing `POST /api/v1/admin/airports/import`, `DELETE /api/v1/admin/airports`, `GET /api/v1/admin/airports/count`. Admin-only (no `#[NoAdminRequired]`).
 
 ### Milestone 1 explicit non-goals
 

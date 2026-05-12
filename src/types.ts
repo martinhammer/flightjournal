@@ -19,6 +19,22 @@ export interface Flight {
 
 export type FlightInput = Omit<Flight, 'id' | 'createdAt' | 'updatedAt'>
 
+export interface Airport {
+	id: number
+	iata: string | null
+	icao: string | null
+	name: string | null
+	city: string | null
+	state: string | null
+	countryIso2: string | null
+	lat: number | null
+	lon: number | null
+	elevation: number | null
+	tz: string | null
+	source: string | null
+	updatedAt: number
+}
+
 export const CABIN_CLASSES = [
 	{ value: 'economy', label: 'Economy' },
 	{ value: 'premium_economy', label: 'Premium economy' },

@@ -53,9 +53,11 @@ class Version0001Date20260508000000 extends SimpleMigrationStep {
 			$table->addColumn('icao', Types::STRING, ['notnull' => false, 'length' => 4]);
 			$table->addColumn('name', Types::STRING, ['notnull' => false, 'length' => 128]);
 			$table->addColumn('city', Types::STRING, ['notnull' => false, 'length' => 64]);
+			$table->addColumn('state', Types::STRING, ['notnull' => false, 'length' => 64]);
 			$table->addColumn('country_iso2', Types::STRING, ['notnull' => false, 'length' => 2]);
 			$table->addColumn('lat', Types::FLOAT, ['notnull' => false]);
 			$table->addColumn('lon', Types::FLOAT, ['notnull' => false]);
+			$table->addColumn('elevation', Types::INTEGER, ['notnull' => false]);
 			$table->addColumn('tz', Types::STRING, ['notnull' => false, 'length' => 64]);
 			$table->addColumn('source', Types::STRING, ['notnull' => false, 'length' => 32]);
 			$table->addColumn('updated_at', Types::BIGINT, ['notnull' => true, 'default' => 0]);

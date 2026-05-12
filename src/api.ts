@@ -1,6 +1,6 @@
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
-import { Flight, FlightInput } from './types.ts'
+import { Airport, Flight, FlightInput } from './types.ts'
 
 const url = (path: string) => {
 	const base = generateOcsUrl('apps/flightjournal' + path)
@@ -35,4 +35,20 @@ export async function updateFlight(id: number, input: FlightInput): Promise<Flig
 
 export async function deleteFlight(id: number): Promise<void> {
 	await axios.delete(url(`/api/v1/flights/${id}`), config)
+}
+
+export interface AirportPage {
+	items: Airport[]
+	total: number
+	limit: number
+	offset: number
+}
+
+export async function listAirports(q: string, limit: number, offset: number): Promise<AirportPage> {
+	const params = new URLSearchParams()
+	if (q.trim()) params.set('q', q.trim())
+	params.set('limit', String(limit))
+	params.set('offset', String(offset))
+	const res = await axios.get<OcsResponse<AirportPage>>(url(`/api/v1/airports?${params.toString()}`), config)
+	return res.data.ocs.data
 }
