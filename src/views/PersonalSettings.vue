@@ -152,7 +152,7 @@ async function runExport() {
 |------|--------|-------|------|------|
 | 2026/04/26 | BA117 | LHR-JFK | B777-300ER | G-STBM |" />
 		<div class="actions">
-			<NcButton variant="primary" :disabled="importing" @click="runImport">
+			<NcButton variant="secondary" :disabled="importing" @click="runImport">
 				Import
 			</NcButton>
 		</div>
@@ -179,7 +179,7 @@ async function runExport() {
 			Download all your flights as a markdown table you can paste back later.
 		</p>
 		<div class="actions">
-			<NcButton variant="primary" :disabled="exporting" @click="runExport">
+			<NcButton variant="secondary" :disabled="exporting" @click="runExport">
 				Download markdown
 			</NcButton>
 		</div>

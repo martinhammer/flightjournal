@@ -99,17 +99,19 @@ Install on NC 31, navigate to Flight Journal, create a flight via the Edit form,
 
 ### Milestone 1 task list
 
-- [ ] Migration creating all five tables with indexes (reference tables empty for now).
-- [ ] `Db/Flight` entity + `FlightMapper`.
-- [ ] `Service/FlightService` with user-scoped CRUD + validation.
-- [ ] `Controller/FlightApiController` (OCS): list, get, create, update, delete.
-- [ ] `appinfo/routes.php` (frontpage route already declared via attribute on `PageController`).
-- [ ] `Settings/Personal` + `Settings/PersonalSection` placeholder.
-- [ ] SPA shell: `NcContent` + `NcAppNavigation` + `vue-router` with four routes.
-- [ ] Edit flight form (functional).
-- [ ] View flight list (functional table).
-- [ ] Map, Analytics views — placeholder components.
-- [ ] Personal settings Vue mount — placeholder.
+- [x] Migration creating all five tables with indexes (reference tables empty for now).
+- [x] `Db/Flight` entity + `FlightMapper`.
+- [x] `Service/FlightService` with user-scoped CRUD + validation.
+- [x] `Controller/FlightApiController` (OCS): list, get, create, update, delete.
+- [x] Routing — all controllers use attribute routing (`#[ApiRoute]`, `#[FrontpageRoute]`); no `appinfo/routes.php` needed.
+- [x] `Settings/Personal` + `Settings/PersonalSection` placeholder.
+- [x] SPA shell: `NcContent` + `NcAppNavigation` + `vue-router` with four routes.
+- [x] Edit flight form (functional).
+- [x] View flight list (functional table).
+- [x] Map, Analytics views — placeholder components.
+- [x] Personal settings Vue mount — placeholder.
+
+Milestone 1 is complete: code implemented and verified end-to-end against NC 31 per the DoD above.
 
 ### Milestone 1 explicit non-goals
 
@@ -117,7 +119,6 @@ Reference data seeding/autocomplete, map, analytics, enrichment, import/export, 
 
 ## Known scaffold quirks
 
-- `vite.config.ts` references `src/main.js` but the file is `src/main.ts` — needs fixing when SPA shell lands.
 - `composer.json` pins `nextcloud/ocp: dev-stable31` — keep in sync with `appinfo/info.xml` `min-version`.
 
 ## PHPUnit tests — to revisit
