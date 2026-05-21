@@ -30,6 +30,30 @@ class AirportApiController extends OCSController {
 	}
 
 	/**
+	 * Look up airports by a comma-separated list of IATA/ICAO codes.
+	 *
+	 * Used by the Map view to resolve coordinates for flown airports.
+	 *
+	 * @param string $codes Comma-separated IATA/ICAO codes
+	 * @return DataResponse<Http::STATUS_OK, array{items: list<array{id: int, iata: ?string, icao: ?string, name: ?string, city: ?string, state: ?string, countryIso2: ?string, lat: ?float, lon: ?float, elevation: ?int, tz: ?string, source: ?string, updatedAt: int}>}, array{}>
+	 *
+	 * 200: Matching airports returned
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'GET', url: '/api/v1/airports/by-codes')]
+	public function byCodes(string $codes = ''): DataResponse {
+		$list = array_values(array_filter(
+			array_map('trim', explode(',', $codes)),
+			static fn (string $c) => $c !== '',
+		));
+		$items = array_values(array_map(
+			static fn ($airport) => $airport->jsonSerialize(),
+			$this->airports->findByCodes($list),
+		));
+		return new DataResponse(['items' => $items]);
+	}
+
+	/**
 	 * List airports with optional search and pagination.
 	 *
 	 * @param string|null $q Optional search term matched against icao/iata/name/city

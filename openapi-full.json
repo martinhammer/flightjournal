@@ -595,6 +595,188 @@
                 }
             }
         },
+        "/ocs/v2.php/apps/flightjournal/api/v1/airports/by-codes": {
+            "get": {
+                "operationId": "airport_api-by-codes",
+                "summary": "Look up airports by a comma-separated list of IATA/ICAO codes.",
+                "description": "Used by the Map view to resolve coordinates for flown airports.",
+                "tags": [
+                    "airport_api"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "codes",
+                        "in": "query",
+                        "description": "Comma-separated IATA/ICAO codes",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Matching airports returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "type": "object",
+                                                    "required": [
+                                                        "items"
+                                                    ],
+                                                    "properties": {
+                                                        "items": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "object",
+                                                                "required": [
+                                                                    "id",
+                                                                    "iata",
+                                                                    "icao",
+                                                                    "name",
+                                                                    "city",
+                                                                    "state",
+                                                                    "countryIso2",
+                                                                    "lat",
+                                                                    "lon",
+                                                                    "elevation",
+                                                                    "tz",
+                                                                    "source",
+                                                                    "updatedAt"
+                                                                ],
+                                                                "properties": {
+                                                                    "id": {
+                                                                        "type": "integer",
+                                                                        "format": "int64"
+                                                                    },
+                                                                    "iata": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "icao": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "name": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "city": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "state": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "countryIso2": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "lat": {
+                                                                        "type": "number",
+                                                                        "format": "double",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "lon": {
+                                                                        "type": "number",
+                                                                        "format": "double",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "elevation": {
+                                                                        "type": "integer",
+                                                                        "format": "int64",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "tz": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "source": {
+                                                                        "type": "string",
+                                                                        "nullable": true
+                                                                    },
+                                                                    "updatedAt": {
+                                                                        "type": "integer",
+                                                                        "format": "int64"
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/ocs/v2.php/apps/flightjournal/api/v1/airports": {
             "get": {
                 "operationId": "airport_api-list",

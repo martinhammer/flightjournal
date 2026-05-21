@@ -6,6 +6,10 @@ module.exports = {
 		'jsdoc/require-jsdoc': 'off',
 		'vue/first-attribute-linebreak': 'off',
 	},
+	globals: {
+		// Ambient namespace declared by @types/geojson (type-only use).
+		GeoJSON: 'readonly',
+	},
 	overrides: [
 		{
 			files: ['**/*.vue'],

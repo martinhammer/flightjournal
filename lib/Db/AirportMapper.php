@@ -63,6 +63,29 @@ class AirportMapper extends QBMapper {
 	}
 
 	/**
+	 * Find every airport whose IATA or ICAO code is in the given list
+	 * (case-insensitive).
+	 *
+	 * @param list<string> $codes
+	 * @return Airport[]
+	 */
+	public function findByCodes(array $codes): array {
+		$lower = array_values(array_unique(array_map('strtolower', $codes)));
+		if ($lower === []) {
+			return [];
+		}
+		$qb = $this->db->getQueryBuilder();
+		$param = $qb->createNamedParameter($lower, IQueryBuilder::PARAM_STR_ARRAY);
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->orX(
+				$qb->expr()->in($qb->func()->lower('iata'), $param),
+				$qb->expr()->in($qb->func()->lower('icao'), $param),
+			));
+		return $this->findEntities($qb);
+	}
+
+	/**
 	 * Find airports whose city equals the given value (case-insensitive).
 	 *
 	 * @return Airport[]

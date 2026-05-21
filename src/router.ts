@@ -1,9 +1,11 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import EditFlightLog from './views/EditFlightLog.vue'
 import ViewFlightLog from './views/ViewFlightLog.vue'
-import MapView from './views/MapView.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import ViewAirports from './views/ViewAirports.vue'
+
+// Lazy-loaded: pulls in Leaflet + the bundled basemap, kept out of the main chunk.
+const MapView = () => import('./views/MapView.vue')
 
 const routes: RouteRecordRaw[] = [
 	{ path: '/', redirect: '/flights' },

@@ -10,6 +10,7 @@ import NcButton from '@nextcloud/vue/components/NcButton'
 import AirplaneLanding from 'vue-material-design-icons/AirplaneLanding.vue'
 import AirplaneTakeoff from 'vue-material-design-icons/AirplaneTakeoff.vue'
 import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
+import MapMarker from 'vue-material-design-icons/MapMarker.vue'
 import { showError } from '@nextcloud/dialogs'
 import { listAirports } from '../api.ts'
 import type { Airport } from '../types.ts'
@@ -86,6 +87,12 @@ function showFlights(a: Airport, direction: 'to' | 'from' | 'either') {
 	if (!code) return
 	router.push({ name: 'flights', query: { airport: code, airportDir: direction } })
 }
+
+function showOnMap(a: Airport) {
+	const code = canonicalCode(a)
+	if (!code) return
+	router.push({ name: 'map', query: { airport: code } })
+}
 </script>
 
 <template>
@@ -151,6 +158,12 @@ function showFlights(a: Airport, direction: 'to' | 'from' | 'either') {
 										<SwapHorizontal :size="20" />
 									</template>
 									Show flights to and from {{ canonicalCode(a) }}
+								</NcActionButton>
+								<NcActionButton @click="showOnMap(a)">
+									<template #icon>
+										<MapMarker :size="20" />
+									</template>
+									Show {{ canonicalCode(a) }} on map
 								</NcActionButton>
 							</NcActions>
 						</td>

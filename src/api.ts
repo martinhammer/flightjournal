@@ -52,3 +52,12 @@ export async function listAirports(q: string, limit: number, offset: number): Pr
 	const res = await axios.get<OcsResponse<AirportPage>>(url(`/api/v1/airports?${params.toString()}`), config)
 	return res.data.ocs.data
 }
+
+export async function getAirportsByCodes(codes: string[]): Promise<Airport[]> {
+	if (codes.length === 0) return []
+	const params = new URLSearchParams({ codes: codes.join(',') })
+	const res = await axios.get<OcsResponse<{ items: Airport[] }>>(
+		url(`/api/v1/airports/by-codes?${params.toString()}`), config,
+	)
+	return res.data.ocs.data.items
+}
