@@ -1,6 +1,6 @@
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
-import { Airport, Flight, FlightInput } from './types.ts'
+import type { Airport, Flight, FlightInput } from './types.ts'
 
 const url = (path: string) => {
 	const base = generateOcsUrl('apps/flightjournal' + path)

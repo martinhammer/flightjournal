@@ -151,12 +151,20 @@ Reference data seeding/autocomplete, map, analytics, enrichment, import/export, 
 - `composer.json` pins `nextcloud/ocp: dev-stable31` — keep in sync with `appinfo/info.xml` `min-version`.
 - **Dependabot npm major bumps gated by Nextcloud tooling peers.** Two bumps are parked, not mergeable: vite 7→8 (PR #16) and TypeScript 5→6 (PR #3). Both fail CI at `npm ci` with `ERESOLVE` — not a code issue. `@nextcloud/vite-config@2.5.2` hard-pins `vite: ^7.1.10`; `@nextcloud/eslint-config@8.4.2` hard-pins `typescript: ^5.0.2`. Bump those Nextcloud packages first; the vite/TS bumps follow only once their peer ranges widen. Don't force with `--legacy-peer-deps` (the org-templated `node.yml` workflow would also need editing, and edits there get overwritten).
 
-## PHPUnit tests — to revisit
+## Testing
 
-Initial unit coverage lives under `tests/unit/Service/` (`FlightServiceTest`, `ImportServiceTest`). Wired up via `tests/phpunit.xml` and runnable through `composer test:unit` / `make test`. `tests/bootstrap.php` registers a PSR-4 prefix for `nextcloud/ocp` because that package ships stubs without its own autoloader — revisit if the OCP package starts autoloading itself or if tests start needing a real Nextcloud server bootstrap.
+### PHPUnit (backend)
+
+Unit coverage lives under `tests/unit/Service/` (`FlightServiceTest`, `ImportServiceTest`). Wired up via `tests/phpunit.xml` and runnable through `composer test:unit` / `make test`. `tests/bootstrap.php` registers a PSR-4 prefix for `nextcloud/ocp` because that package ships stubs without its own autoloader — revisit if the OCP package starts autoloading itself or if tests start needing a real Nextcloud server bootstrap.
 
 Still missing and worth adding once the API surface settles past Milestone 1:
 
 - `Service/ExportService` — small, smoke test only.
 - `Controller/FlightApiController` and `Controller/SettingsApiController` — happy-path + error-path per endpoint.
 - Integration-style tests for `Db/FlightMapper` and migrations (need a real DB; currently out of scope for unit tests).
+
+### Frontend (Vitest + type-check)
+
+- **Type-check:** `npm run type-check` (`vue-tsc --noEmit`) is a gate — wired into `make lint`. It catches `@nextcloud/vue` v8→v9 prop/event mismatches. `src/shims-icons.d.ts` declares the `vue-material-design-icons/*.vue` modules (the package ships `.d.vue.ts` files but no `exports` map).
+- **Component tests:** Vitest + `@vue/test-utils` under `tests/frontend/` (`*.spec.ts`), config in `vitest.config.ts`, shared mocks in `tests/frontend/setup.ts`. Run via `npm run test:frontend`, gated through `make test`. `@nextcloud/vue` is inlined (`server.deps.inline`) so Vite handles its CSS side-effect imports.
+- **Add a component test for every new interaction-critical UI path** (form save, search, filter, destructive action). Test the wiring as a user drives it — stub heavy children but emit the real model event / click the real button so a wrong prop or event name fails the test. When mounting a real `@nextcloud/vue` component, mock `vue-router` with `importOriginal` so injected keys (`routerKey`) survive.

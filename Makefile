@@ -17,8 +17,8 @@ help:
 	@echo "  make stage        Stage a deployable tree from the working tree (uncommitted changes)"
 	@echo "  make package      Build and produce $(zip_name) under build/release/"
 	@echo "  make dev          Install all dev dependencies (npm + composer with tooling)"
-	@echo "  make lint         Run all linters (PHP, ESLint, Stylelint)"
-	@echo "  make test         Run PHPUnit"
+	@echo "  make lint         Run all linters (PHP, ESLint, vue-tsc, Stylelint)"
+	@echo "  make test         Run PHPUnit + frontend (Vitest) tests"
 	@echo "  make psalm        Run Psalm"
 	@echo "  make openapi      Regenerate openapi.json and verify it matches the committed copy"
 	@echo "  make clean        Remove build artifacts (build/, js/, css/) — keeps dev deps installed"
@@ -66,11 +66,13 @@ lint:
 	composer lint
 	composer cs:check
 	npm run lint
+	npm run type-check
 	npm run stylelint
 
 .PHONY: test
 test:
 	composer test:unit
+	npm run test:frontend
 
 .PHONY: psalm
 psalm:

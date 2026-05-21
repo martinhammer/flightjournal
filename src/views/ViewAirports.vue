@@ -93,12 +93,11 @@ function showFlights(a: Airport, direction: 'to' | 'from' | 'either') {
 		<div class="header">
 			<h2>Airports</h2>
 			<NcTextField
-				:value="query"
+				:model-value="query"
 				label="Search"
-				label-visible
 				placeholder="ICAO, IATA, name or city"
 				class="search"
-				@update:value="query = $event" />
+				@update:model-value="query = String($event)" />
 		</div>
 
 		<div v-if="loading && !loaded" class="loader">

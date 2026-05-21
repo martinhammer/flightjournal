@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory, RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import EditFlightLog from './views/EditFlightLog.vue'
 import ViewFlightLog from './views/ViewFlightLog.vue'
 import MapView from './views/MapView.vue'

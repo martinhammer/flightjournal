@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '../api.ts'
-import { Flight, FlightInput } from '../types.ts'
+import type { Flight, FlightInput } from '../types.ts'
 
 export const useFlightsStore = defineStore('flights', () => {
 	const flights = ref<Flight[]>([])

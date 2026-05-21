@@ -103,16 +103,16 @@ async function add() {
 				<NcDateTimePickerNative v-model="dateModel" type="date" label="Flight date" />
 			</div>
 			<div class="row two">
-				<NcTextField label="Origin" :model-value="form.originLabel ?? ''" @update:model-value="(v: string) => form.originLabel = v || null" />
-				<NcTextField label="Destination" :model-value="form.destinationLabel ?? ''" @update:model-value="(v: string) => form.destinationLabel = v || null" />
+				<NcTextField label="Origin" :model-value="form.originLabel ?? ''" @update:model-value="(v: string | number) => form.originLabel = String(v) || null" />
+				<NcTextField label="Destination" :model-value="form.destinationLabel ?? ''" @update:model-value="(v: string | number) => form.destinationLabel = String(v) || null" />
 			</div>
 			<div class="row two">
-				<NcTextField label="Airline code" :model-value="form.airlineCode ?? ''" @update:model-value="(v: string) => form.airlineCode = v || null" />
-				<NcTextField label="Flight number" :model-value="form.flightNumber ?? ''" @update:model-value="(v: string) => form.flightNumber = v || null" />
+				<NcTextField label="Airline code" :model-value="form.airlineCode ?? ''" @update:model-value="(v: string | number) => form.airlineCode = String(v) || null" />
+				<NcTextField label="Flight number" :model-value="form.flightNumber ?? ''" @update:model-value="(v: string | number) => form.flightNumber = String(v) || null" />
 			</div>
 			<div class="row two">
-				<NcTextField label="Aircraft type" :model-value="form.aircraftTypeRaw ?? ''" @update:model-value="(v: string) => form.aircraftTypeRaw = v || null" />
-				<NcTextField label="Registration" :model-value="form.registration ?? ''" @update:model-value="(v: string) => form.registration = v || null" />
+				<NcTextField label="Aircraft type" :model-value="form.aircraftTypeRaw ?? ''" @update:model-value="(v: string | number) => form.aircraftTypeRaw = String(v) || null" />
+				<NcTextField label="Registration" :model-value="form.registration ?? ''" @update:model-value="(v: string | number) => form.registration = String(v) || null" />
 			</div>
 			<div class="row half">
 				<NcSelect v-model="cabinSelection"
@@ -122,7 +122,7 @@ async function add() {
 					label="label" />
 			</div>
 			<div class="row half">
-				<NcTextField label="Seat" :model-value="form.seat ?? ''" @update:model-value="(v: string) => form.seat = v || null" />
+				<NcTextField label="Seat" :model-value="form.seat ?? ''" @update:model-value="(v: string | number) => form.seat = String(v) || null" />
 			</div>
 		</div>
 		<template #actions>
