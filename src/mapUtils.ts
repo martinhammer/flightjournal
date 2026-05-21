@@ -35,6 +35,70 @@ export function buildLegs(flights: Flight[], byCode: Map<string, Airport>): MapL
 	return legs
 }
 
+// Number of journal flights involving each airport code (as origin OR
+// destination), keyed by uppercased code. Each flight counts once per airport.
+export function countFlightsByAirport(flights: Flight[]): Map<string, number> {
+	const counts = new Map<string, number>()
+	for (const f of flights) {
+		const codes = new Set<string>()
+		if (f.originCode) codes.add(f.originCode.toUpperCase())
+		if (f.destinationCode) codes.add(f.destinationCode.toUpperCase())
+		for (const code of codes) counts.set(code, (counts.get(code) ?? 0) + 1)
+	}
+	return counts
+}
+
+// Canonical key for an unordered airport pair, e.g. routeKey('LHR','JFK') and
+// routeKey('JFK','LHR') both yield 'JFK|LHR'.
+export function routeKey(codeA: string, codeB: string): string {
+	return [codeA.toUpperCase(), codeB.toUpperCase()].sort().join('|')
+}
+
+// Number of journal flights between each airport pair, counting both
+// directions together, keyed by routeKey().
+export function countFlightsByRoute(flights: Flight[]): Map<string, number> {
+	const counts = new Map<string, number>()
+	for (const f of flights) {
+		if (!f.originCode || !f.destinationCode) continue
+		const key = routeKey(f.originCode, f.destinationCode)
+		counts.set(key, (counts.get(key) ?? 0) + 1)
+	}
+	return counts
+}
+
+// The two directional orderings [from, to] of a route pair, with the
+// oldest-flown direction first. Falls back to alphabetical by code when no
+// flight resolves the order.
+export function orderedRouteDirections(a: string, b: string, flights: Flight[]): [string, string][] {
+	const codeA = a.toUpperCase()
+	const codeB = b.toUpperCase()
+	let oldest: Flight | null = null
+	for (const f of flights) {
+		const o = (f.originCode ?? '').toUpperCase()
+		const d = (f.destinationCode ?? '').toUpperCase()
+		const onRoute = (o === codeA && d === codeB) || (o === codeB && d === codeA)
+		if (onRoute && (oldest === null || f.flightDate < oldest.flightDate)) {
+			oldest = f
+		}
+	}
+	if (oldest && oldest.originCode && oldest.destinationCode) {
+		const o = oldest.originCode.toUpperCase()
+		const d = oldest.destinationCode.toUpperCase()
+		return [[o, d], [d, o]]
+	}
+	const sorted = [codeA, codeB].sort()
+	return [[sorted[0], sorted[1]], [sorted[1], sorted[0]]]
+}
+
+// The directional [from, to] pairs of a route that were actually flown,
+// oldest-flown first. Returns one entry when the route was only flown one way.
+export function flownRouteDirections(a: string, b: string, flights: Flight[]): [string, string][] {
+	const flown = (from: string, to: string) => flights.some((f) =>
+		(f.originCode ?? '').toUpperCase() === from
+		&& (f.destinationCode ?? '').toUpperCase() === to)
+	return orderedRouteDirections(a, b, flights).filter(([from, to]) => flown(from, to))
+}
+
 // Index airports by their canonical code (IATA preferred, else ICAO), uppercased.
 export function indexByCode(airports: Airport[]): Map<string, Airport> {
 	const map = new Map<string, Airport>()

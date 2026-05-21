@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
+import NcButton from '@nextcloud/vue/components/NcButton'
 import NcChip from '@nextcloud/vue/components/NcChip'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
@@ -12,7 +13,9 @@ import Pencil from 'vue-material-design-icons/Pencil.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import { showConfirmation, showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
+import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
 import { CABIN_CLASSES, type Flight } from '../types.ts'
+import Map from 'vue-material-design-icons/Map.vue'
 
 type SortKey = 'date' | 'flight' | 'route' | 'aircraft' | 'registration' | 'cabin' | 'seat'
 type SortDir = 'asc' | 'desc'
@@ -25,55 +28,22 @@ const router = useRouter()
 const route = useRoute()
 const store = useFlightsStore()
 
-/**
- * An active filter derived from the route query. New filter types (by airline,
- * aircraft, date range, …) can be added by extending buildFilters() — the chip
- * row and clearing logic are generic over this shape.
- */
-interface ActiveFilter {
-	id: string
-	label: string
-	/** Query keys to drop when this filter's chip is cleared. */
-	queryKeys: string[]
-	matches: (f: Flight) => boolean
-}
-
-function buildFilters(query: LocationQuery): ActiveFilter[] {
-	const filters: ActiveFilter[] = []
-
-	const airport = typeof query.airport === 'string' ? query.airport.toUpperCase() : ''
-	if (airport) {
-		const dir = query.airportDir === 'from' || query.airportDir === 'either'
-			? query.airportDir
-			: 'to'
-		const label = dir === 'from'
-			? `From ${airport}`
-			: dir === 'either'
-				? `To / from ${airport}`
-				: `To ${airport}`
-		filters.push({
-			id: 'airport',
-			label,
-			queryKeys: ['airport', 'airportDir'],
-			matches: (f) => {
-				const origin = (f.originCode ?? '').toUpperCase()
-				const destination = (f.destinationCode ?? '').toUpperCase()
-				if (dir === 'from') return origin === airport
-				if (dir === 'either') return origin === airport || destination === airport
-				return destination === airport
-			},
-		})
-	}
-
-	return filters
-}
-
-const activeFilters = computed<ActiveFilter[]>(() => buildFilters(route.query))
+const activeFilters = computed<ActiveFilter[]>(() => buildFilters(route.query, store.flights))
 
 function clearFilter(filter: ActiveFilter) {
 	const query: LocationQuery = { ...route.query }
 	for (const key of filter.queryKeys) delete query[key]
 	router.push({ name: 'flights', query })
+}
+
+// Carry the current filter query across to the Map view.
+function viewOnMap() {
+	router.push({ name: 'map', query: { ...route.query } })
+}
+
+// Show a single flight on the Map view.
+function viewFlightOnMap(f: Flight) {
+	router.push({ name: 'map', query: { flight: String(f.id) } })
 }
 
 onMounted(() => { if (!store.loaded) store.fetchAll() })
@@ -123,11 +93,7 @@ const sortedFlights = computed<Flight[]>(() => {
 	return list
 })
 
-const visibleFlights = computed<Flight[]>(() => {
-	const filters = activeFilters.value
-	if (filters.length === 0) return sortedFlights.value
-	return sortedFlights.value.filter((f) => filters.every((filter) => filter.matches(f)))
-})
+const visibleFlights = computed<Flight[]>(() => applyFilters(sortedFlights.value, activeFilters.value))
 
 function setSort(key: SortKey) {
 	if (sortKey.value === key) {
@@ -182,12 +148,25 @@ async function remove(f: Flight) {
 			<NcLoadingIcon />
 		</div>
 		<template v-else>
-			<div v-if="activeFilters.length" class="filter-chips">
-				<NcChip
-					v-for="filter in activeFilters"
-					:key="filter.id"
-					:text="filter.label"
-					@close="clearFilter(filter)" />
+			<div v-if="activeFilters.length" class="filter-bar">
+				<div class="filter-chips">
+					<NcChip
+						v-for="filter in activeFilters"
+						:key="filter.id"
+						:text="filter.label"
+						@close="clearFilter(filter)" />
+				</div>
+				<div class="filter-actions">
+					<span class="filter-count">
+						Showing {{ visibleFlights.length }} out of {{ store.flights.length }} flights
+					</span>
+					<NcButton variant="secondary" @click="viewOnMap">
+						<template #icon>
+							<Map :size="20" />
+						</template>
+						View on map
+					</NcButton>
+				</div>
 			</div>
 			<NcEmptyContent
 				v-if="store.flights.length === 0"
@@ -227,6 +206,12 @@ async function remove(f: Flight) {
 						<td>{{ f.seat ?? '' }}</td>
 						<td class="actions">
 							<NcActions :force-menu="true">
+								<NcActionButton @click="viewFlightOnMap(f)">
+									<template #icon>
+										<Map :size="20" />
+									</template>
+									View on map
+								</NcActionButton>
 								<NcActionButton @click="edit(f)">
 									<template #icon>
 										<Pencil :size="20" />
@@ -266,11 +251,28 @@ async function remove(f: Flight) {
 	padding: 32px;
 }
 
+.filter-bar {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 10px;
+	margin-bottom: 16px;
+}
+
 .filter-chips {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
-	margin-bottom: 16px;
+}
+
+.filter-actions {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.filter-count {
+	color: var(--color-text-maxcontrast);
 }
 
 .flight-table {

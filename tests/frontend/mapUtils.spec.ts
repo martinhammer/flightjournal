@@ -2,8 +2,13 @@ import { describe, it, expect } from 'vitest'
 import {
 	buildLegs,
 	collectAirportCodes,
+	countFlightsByAirport,
+	countFlightsByRoute,
+	flownRouteDirections,
 	indexByCode,
+	orderedRouteDirections,
 	prepareBasemap,
+	routeKey,
 	unwrapRing,
 } from '../../src/mapUtils.ts'
 import type { Airport, Flight } from '../../src/types.ts'
@@ -61,6 +66,73 @@ describe('collectAirportCodes', () => {
 
 	it('includes the focus code even when not flown', () => {
 		expect(collectAirportCodes([], 'osh')).toEqual(['OSH'])
+	})
+})
+
+describe('countFlightsByAirport', () => {
+	it('counts each flight once per airport it involves', () => {
+		const counts = countFlightsByAirport([
+			flight({ originCode: 'LHR', destinationCode: 'JFK' }),
+			flight({ originCode: 'JFK', destinationCode: 'LHR' }),
+			flight({ originCode: 'CPH', destinationCode: 'LHR' }),
+		])
+		expect(counts.get('LHR')).toBe(3)
+		expect(counts.get('JFK')).toBe(2)
+		expect(counts.get('CPH')).toBe(1)
+	})
+
+	it('is case-insensitive and ignores flights with no code', () => {
+		const counts = countFlightsByAirport([
+			flight({ originCode: 'lhr', destinationCode: null }),
+			flight({ originCode: null, destinationCode: null }),
+		])
+		expect(counts.get('LHR')).toBe(1)
+	})
+})
+
+describe('countFlightsByRoute', () => {
+	it('counts both directions of a route together', () => {
+		const counts = countFlightsByRoute([
+			flight({ originCode: 'LHR', destinationCode: 'JFK' }),
+			flight({ originCode: 'JFK', destinationCode: 'LHR' }),
+			flight({ originCode: 'lhr', destinationCode: 'jfk' }),
+			flight({ originCode: 'CPH', destinationCode: 'LHR' }),
+		])
+		expect(counts.get(routeKey('JFK', 'LHR'))).toBe(3)
+		expect(counts.get(routeKey('CPH', 'LHR'))).toBe(1)
+	})
+
+	it('routeKey is order-independent and uppercased', () => {
+		expect(routeKey('lhr', 'JFK')).toBe(routeKey('jfk', 'LHR'))
+	})
+})
+
+describe('orderedRouteDirections', () => {
+	it('puts the oldest-flown direction first', () => {
+		const flights = [
+			{ ...flight({ originCode: 'JFK', destinationCode: 'LHR' }), flightDate: '2020-01-01' },
+			{ ...flight({ originCode: 'LHR', destinationCode: 'JFK' }), flightDate: '2019-01-01' },
+		]
+		expect(orderedRouteDirections('LHR', 'JFK', flights)).toEqual([['LHR', 'JFK'], ['JFK', 'LHR']])
+	})
+
+	it('falls back to alphabetical order when no flight resolves it', () => {
+		expect(orderedRouteDirections('LHR', 'JFK', [])).toEqual([['JFK', 'LHR'], ['LHR', 'JFK']])
+	})
+})
+
+describe('flownRouteDirections', () => {
+	it('returns both directions when the route was flown both ways', () => {
+		const flights = [
+			flight({ originCode: 'LHR', destinationCode: 'JFK' }),
+			flight({ originCode: 'JFK', destinationCode: 'LHR' }),
+		]
+		expect(flownRouteDirections('LHR', 'JFK', flights)).toHaveLength(2)
+	})
+
+	it('returns only the flown direction for a one-way route', () => {
+		const flights = [flight({ originCode: 'LHR', destinationCode: 'JFK' })]
+		expect(flownRouteDirections('JFK', 'LHR', flights)).toEqual([['LHR', 'JFK']])
 	})
 })
 
