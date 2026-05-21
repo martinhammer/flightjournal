@@ -81,6 +81,10 @@ describe('EditFlightLog save', () => {
 		expect(store.update).toHaveBeenCalledWith(1, expect.objectContaining({
 			originLabel: 'Copenhagen Kastrup',
 			destinationLabel: 'London Heathrow',
+			// Codes must not be round-tripped — they are reconciled server-side
+			// from the (possibly edited) label.
+			originCode: null,
+			destinationCode: null,
 		}))
 	})
 })
