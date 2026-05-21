@@ -43,23 +43,21 @@ class ImportServiceTest extends TestCase {
 		$this->assertSame([], $result['skipped']);
 
 		$this->assertSame('alice', $captured[0][0]);
-		// NOTE: the airline/number split is greedy ({2,3} on the prefix) so
-		// "SK4745" currently becomes airline=SK4, number=745. This pins the
-		// existing behaviour rather than the intended SK/4745 split — the
-		// underlying splitFlightNumber regex is suspect (see CLAUDE.md).
+		// The airline prefix is exactly 2 characters; the rest is the flight
+		// number — "SK4745" splits as SK/4745.
 		$this->assertSame([
 			'flightDate' => '2026-05-01',
 			'originLabel' => 'CPH',
 			'destinationLabel' => 'LHR',
-			'airlineCode' => 'SK4',
-			'flightNumber' => '745',
+			'airlineCode' => 'SK',
+			'flightNumber' => '4745',
 			'aircraftTypeRaw' => 'B738',
 			'registration' => 'OY-KAL',
 		], $captured[0][1]);
 
 		$this->assertSame('2026-05-02', $captured[1][1]['flightDate']);
-		$this->assertSame('W61', $captured[1][1]['airlineCode']);
-		$this->assertSame('383', $captured[1][1]['flightNumber']);
+		$this->assertSame('W6', $captured[1][1]['airlineCode']);
+		$this->assertSame('1383', $captured[1][1]['flightNumber']);
 	}
 
 	public function testWorksWithoutHeaderRow(): void {

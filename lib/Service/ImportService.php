@@ -17,7 +17,7 @@ class ImportService {
 	 *
 	 * Date format: YYYY/MM/DD (slashes) or YYYY-MM-DD (dashes).
 	 * Route format: ORIGIN-DESTINATION (split on the first hyphen).
-	 * Flight format: alphanumeric airline prefix followed by digits (e.g. SK4745, W61383).
+	 * Flight format: 2-character airline prefix followed by digits (e.g. SK4745, W61383).
 	 *
 	 * @return array{
 	 *     imported: int,
@@ -161,7 +161,10 @@ class ImportService {
 		if ($value === '' || strcasecmp($value, 'N/A') === 0) {
 			return [null, null];
 		}
-		if (preg_match('/^([A-Z0-9]{2,3})\s*(\d+)$/i', $value, $m)) {
+		// IATA airline designators are exactly 2 characters; the rest is the
+		// flight number. Anchoring the prefix at 2 avoids the greedy split that
+		// turned "SK4745" into SK4/745.
+		if (preg_match('/^([A-Z0-9]{2})\s*(\d+)$/i', $value, $m)) {
 			return [strtoupper($m[1]), $m[2]];
 		}
 		// Fallback: keep the whole token as flight number, no airline split
