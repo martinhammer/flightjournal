@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
+import NcChip from '@nextcloud/vue/components/NcChip'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import MenuDown from 'vue-material-design-icons/MenuDown.vue'
@@ -21,7 +22,59 @@ const cabinLabels: Record<string, string> = Object.fromEntries(
 )
 
 const router = useRouter()
+const route = useRoute()
 const store = useFlightsStore()
+
+/**
+ * An active filter derived from the route query. New filter types (by airline,
+ * aircraft, date range, …) can be added by extending buildFilters() — the chip
+ * row and clearing logic are generic over this shape.
+ */
+interface ActiveFilter {
+	id: string
+	label: string
+	/** Query keys to drop when this filter's chip is cleared. */
+	queryKeys: string[]
+	matches: (f: Flight) => boolean
+}
+
+function buildFilters(query: LocationQuery): ActiveFilter[] {
+	const filters: ActiveFilter[] = []
+
+	const airport = typeof query.airport === 'string' ? query.airport.toUpperCase() : ''
+	if (airport) {
+		const dir = query.airportDir === 'from' || query.airportDir === 'either'
+			? query.airportDir
+			: 'to'
+		const label = dir === 'from'
+			? `From ${airport}`
+			: dir === 'either'
+				? `To / from ${airport}`
+				: `To ${airport}`
+		filters.push({
+			id: 'airport',
+			label,
+			queryKeys: ['airport', 'airportDir'],
+			matches: (f) => {
+				const origin = (f.originCode ?? '').toUpperCase()
+				const destination = (f.destinationCode ?? '').toUpperCase()
+				if (dir === 'from') return origin === airport
+				if (dir === 'either') return origin === airport || destination === airport
+				return destination === airport
+			},
+		})
+	}
+
+	return filters
+}
+
+const activeFilters = computed<ActiveFilter[]>(() => buildFilters(route.query))
+
+function clearFilter(filter: ActiveFilter) {
+	const query: LocationQuery = { ...route.query }
+	for (const key of filter.queryKeys) delete query[key]
+	router.push({ name: 'flights', query })
+}
 
 onMounted(() => { if (!store.loaded) store.fetchAll() })
 
@@ -45,7 +98,7 @@ function sortValue(f: Flight, key: SortKey): string {
 	case 'flight':
 		return `${f.airlineCode ?? ''}${(f.flightNumber ?? '').padStart(6, '0')}`
 	case 'route':
-		return route(f).toLowerCase()
+		return routeLabel(f).toLowerCase()
 	case 'aircraft':
 		return (f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '').toLowerCase()
 	case 'registration':
@@ -70,6 +123,12 @@ const sortedFlights = computed<Flight[]>(() => {
 	return list
 })
 
+const visibleFlights = computed<Flight[]>(() => {
+	const filters = activeFilters.value
+	if (filters.length === 0) return sortedFlights.value
+	return sortedFlights.value.filter((f) => filters.every((filter) => filter.matches(f)))
+})
+
 function setSort(key: SortKey) {
 	if (sortKey.value === key) {
 		sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
@@ -79,9 +138,9 @@ function setSort(key: SortKey) {
 	}
 }
 
-function route(f: Flight): string {
-	const o = f.originLabel || f.originCode || '?'
-	const d = f.destinationLabel || f.destinationCode || '?'
+function routeLabel(f: Flight): string {
+	const o = f.originCode || f.originLabel || '?'
+	const d = f.destinationCode || f.destinationLabel || '?'
 	return `${o} → ${d}`
 }
 
@@ -91,7 +150,8 @@ function flightNo(f: Flight): string {
 }
 
 function edit(f: Flight) {
-	router.push(`/flights/${f.id}/edit`)
+	// Carry the active filter query along so it survives the edit round-trip.
+	router.push({ path: `/flights/${f.id}/edit`, query: route.query })
 }
 
 async function remove(f: Flight) {
@@ -121,57 +181,70 @@ async function remove(f: Flight) {
 		<div v-if="store.loading && !store.loaded" class="loader">
 			<NcLoadingIcon />
 		</div>
-		<NcEmptyContent
-			v-else-if="store.loaded && store.flights.length === 0"
-			name="No flights yet"
-			description="Add your first flight to get started." />
-		<table v-else class="flight-table">
-			<thead>
-				<tr>
-					<th v-for="col in columns" :key="col.key" :class="{ sorted: sortKey === col.key }">
-						<button
-							type="button"
-							class="sort-button"
-							:aria-sort="sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
-							@click="setSort(col.key)">
-							<span>{{ col.label }}</span>
-							<span class="sort-indicator">
-								<MenuUp v-if="sortKey === col.key && sortDir === 'asc'" :size="16" />
-								<MenuDown v-else-if="sortKey === col.key && sortDir === 'desc'" :size="16" />
-							</span>
-						</button>
-					</th>
-					<th />
-				</tr>
-			</thead>
-			<tbody>
-				<tr v-for="f in sortedFlights" :key="f.id">
-					<td>{{ f.flightDate }}</td>
-					<td>{{ flightNo(f) }}</td>
-					<td>{{ route(f) }}</td>
-					<td>{{ f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '' }}</td>
-					<td>{{ f.registration ?? '' }}</td>
-					<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
-					<td>{{ f.seat ?? '' }}</td>
-					<td class="actions">
-						<NcActions :force-menu="true">
-							<NcActionButton @click="edit(f)">
-								<template #icon>
-									<Pencil :size="20" />
-								</template>
-								Edit
-							</NcActionButton>
-							<NcActionButton @click="remove(f)">
-								<template #icon>
-									<TrashCan :size="20" />
-								</template>
-								Delete
-							</NcActionButton>
-						</NcActions>
-					</td>
-				</tr>
-			</tbody>
-		</table>
+		<template v-else>
+			<div v-if="activeFilters.length" class="filter-chips">
+				<NcChip
+					v-for="filter in activeFilters"
+					:key="filter.id"
+					:text="filter.label"
+					@close="clearFilter(filter)" />
+			</div>
+			<NcEmptyContent
+				v-if="store.flights.length === 0"
+				name="No flights yet"
+				description="Add your first flight to get started." />
+			<NcEmptyContent
+				v-else-if="visibleFlights.length === 0"
+				name="No matching flights"
+				description="No flights match the current filter." />
+			<table v-else class="flight-table">
+				<thead>
+					<tr>
+						<th v-for="col in columns" :key="col.key" :class="{ sorted: sortKey === col.key }">
+							<button
+								type="button"
+								class="sort-button"
+								:aria-sort="sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+								@click="setSort(col.key)">
+								<span>{{ col.label }}</span>
+								<span class="sort-indicator">
+									<MenuUp v-if="sortKey === col.key && sortDir === 'asc'" :size="16" />
+									<MenuDown v-else-if="sortKey === col.key && sortDir === 'desc'" :size="16" />
+								</span>
+							</button>
+						</th>
+						<th />
+					</tr>
+				</thead>
+				<tbody>
+					<tr v-for="f in visibleFlights" :key="f.id">
+						<td>{{ f.flightDate }}</td>
+						<td>{{ flightNo(f) }}</td>
+						<td>{{ routeLabel(f) }}</td>
+						<td>{{ f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '' }}</td>
+						<td>{{ f.registration ?? '' }}</td>
+						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
+						<td>{{ f.seat ?? '' }}</td>
+						<td class="actions">
+							<NcActions :force-menu="true">
+								<NcActionButton @click="edit(f)">
+									<template #icon>
+										<Pencil :size="20" />
+									</template>
+									Edit
+								</NcActionButton>
+								<NcActionButton @click="remove(f)">
+									<template #icon>
+										<TrashCan :size="20" />
+									</template>
+									Delete
+								</NcActionButton>
+							</NcActions>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</template>
 	</div>
 </template>
 
@@ -191,6 +264,13 @@ async function remove(f: Flight) {
 	display: flex;
 	justify-content: center;
 	padding: 32px;
+}
+
+.filter-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 16px;
 }
 
 .flight-table {

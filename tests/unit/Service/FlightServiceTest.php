@@ -6,6 +6,8 @@ namespace OCA\FlightJournal\Tests\Unit\Service;
 
 use OCA\FlightJournal\Db\Flight;
 use OCA\FlightJournal\Db\FlightMapper;
+use OCA\FlightJournal\Service\AirportMatch;
+use OCA\FlightJournal\Service\AirportReconciliationService;
 use OCA\FlightJournal\Service\FlightService;
 use OCA\FlightJournal\Service\NotFoundException;
 use OCA\FlightJournal\Service\ValidationException;
@@ -17,6 +19,7 @@ use PHPUnit\Framework\TestCase;
 class FlightServiceTest extends TestCase {
 	private FlightMapper&MockObject $mapper;
 	private ITimeFactory&MockObject $time;
+	private AirportReconciliationService&MockObject $reconciler;
 	private FlightService $service;
 
 	protected function setUp(): void {
@@ -24,7 +27,8 @@ class FlightServiceTest extends TestCase {
 		$this->mapper = $this->createMock(FlightMapper::class);
 		$this->time = $this->createMock(ITimeFactory::class);
 		$this->time->method('getTime')->willReturn(1700000000);
-		$this->service = new FlightService($this->mapper, $this->time);
+		$this->reconciler = $this->createMock(AirportReconciliationService::class);
+		$this->service = new FlightService($this->mapper, $this->time, $this->reconciler);
 	}
 
 	private function validData(array $overrides = []): array {
@@ -217,5 +221,83 @@ class FlightServiceTest extends TestCase {
 			->with('alice')
 			->willReturn(42);
 		$this->assertSame(42, $this->service->deleteAll('alice'));
+	}
+
+	public function testCreateResolvesLabelsToCodesAndRewritesLabels(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup')],
+			['London', new AirportMatch('LHR', 'London Heathrow')],
+		]);
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertSame('CPH', $captured->getOriginCode());
+		$this->assertSame('LHR', $captured->getDestinationCode());
+		// On a match the label is replaced with the reference airport name.
+		$this->assertSame('Copenhagen Kastrup', $captured->getOriginLabel());
+		$this->assertSame('London Heathrow', $captured->getDestinationLabel());
+	}
+
+	public function testCreateKeepsLabelWhenMatchHasNoName(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		$this->reconciler->method('resolve')->willReturn(new AirportMatch('XXX', null));
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertSame('XXX', $captured->getOriginCode());
+		$this->assertSame('Copenhagen', $captured->getOriginLabel(), 'label kept when match has no name');
+	}
+
+	public function testCreateLeavesCodeNullWhenLabelUnresolved(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		$this->reconciler->method('resolve')->willReturn(null);
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertNull($captured->getOriginCode());
+		$this->assertNull($captured->getDestinationCode());
+	}
+
+	public function testReconcileAllOnlyMissingSkipsFlightsWithCode(): void {
+		$withCode = new Flight();
+		$withCode->setOriginLabel('Copenhagen');
+		$withCode->setOriginCode('CPH');
+		$withCode->setDestinationLabel('London');
+		$withCode->setDestinationCode('LHR');
+
+		$missing = new Flight();
+		$missing->setOriginLabel('Copenhagen');
+		$missing->setDestinationLabel('Nowhere');
+
+		$this->mapper->method('findAllForUser')->willReturn([$withCode, $missing]);
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup')],
+			['Nowhere', null],
+		]);
+		$this->mapper->expects($this->once())->method('update');
+
+		$result = $this->service->reconcileAll('alice', true);
+
+		$this->assertSame(2, $result['flights']);
+		$this->assertSame(1, $result['updated']);
+		$this->assertSame(1, $result['matched']);
+		$this->assertSame(1, $result['unmatched']);
+		$this->assertSame('CPH', $missing->getOriginCode());
+		$this->assertSame('Copenhagen Kastrup', $missing->getOriginLabel(), 'recheck rewrites the label too');
+		// The flight that already had codes was skipped entirely.
+		$this->assertSame('London', $withCode->getDestinationLabel());
 	}
 }

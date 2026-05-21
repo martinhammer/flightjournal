@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import NcActionButton from '@nextcloud/vue/components/NcActionButton'
+import NcActions from '@nextcloud/vue/components/NcActions'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import AirplaneLanding from 'vue-material-design-icons/AirplaneLanding.vue'
+import AirplaneTakeoff from 'vue-material-design-icons/AirplaneTakeoff.vue'
+import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
 import { showError } from '@nextcloud/dialogs'
 import { listAirports } from '../api.ts'
 import type { Airport } from '../types.ts'
+
+const router = useRouter()
 
 const PAGE_SIZE = 100
 
@@ -67,6 +75,17 @@ function coord(a: Airport): string {
 	if (a.lat === null || a.lon === null) return ''
 	return `${a.lat.toFixed(3)}, ${a.lon.toFixed(3)}`
 }
+
+// Canonical code as stored on flights: IATA when present, else ICAO.
+function canonicalCode(a: Airport): string | null {
+	return a.iata || a.icao || null
+}
+
+function showFlights(a: Airport, direction: 'to' | 'from' | 'either') {
+	const code = canonicalCode(a)
+	if (!code) return
+	router.push({ name: 'flights', query: { airport: code, airportDir: direction } })
+}
 </script>
 
 <template>
@@ -101,6 +120,7 @@ function coord(a: Airport): string {
 						<th>Coordinates</th>
 						<th>Elevation</th>
 						<th>Timezone</th>
+						<th />
 					</tr>
 				</thead>
 				<tbody>
@@ -113,6 +133,28 @@ function coord(a: Airport): string {
 						<td>{{ coord(a) }}</td>
 						<td>{{ a.elevation ?? '' }}</td>
 						<td>{{ a.tz ?? '' }}</td>
+						<td class="row-actions">
+							<NcActions v-if="canonicalCode(a)" :force-menu="true">
+								<NcActionButton @click="showFlights(a, 'to')">
+									<template #icon>
+										<AirplaneLanding :size="20" />
+									</template>
+									Show flights to {{ canonicalCode(a) }}
+								</NcActionButton>
+								<NcActionButton @click="showFlights(a, 'from')">
+									<template #icon>
+										<AirplaneTakeoff :size="20" />
+									</template>
+									Show flights from {{ canonicalCode(a) }}
+								</NcActionButton>
+								<NcActionButton @click="showFlights(a, 'either')">
+									<template #icon>
+										<SwapHorizontal :size="20" />
+									</template>
+									Show flights to and from {{ canonicalCode(a) }}
+								</NcActionButton>
+							</NcActions>
+						</td>
 					</tr>
 				</tbody>
 			</table>
@@ -182,5 +224,10 @@ function coord(a: Airport): string {
 
 .pager-info {
 	color: var(--color-text-maxcontrast);
+}
+
+.row-actions {
+	width: 44px;
+	padding: 0;
 }
 </style>

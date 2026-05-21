@@ -4,6 +4,7 @@ import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
 import { showConfirmation, showError, showSuccess } from '@nextcloud/dialogs'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcSettingsSection from '@nextcloud/vue/components/NcSettingsSection'
 import NcTextArea from '@nextcloud/vue/components/NcTextArea'
@@ -27,6 +28,10 @@ const importing = ref(false)
 const lastResult = ref<ImportResult | null>(null)
 const exporting = ref(false)
 const deleting = ref(false)
+const reconciling = ref(false)
+const reconcileAllFlights = ref(false)
+
+interface ReconcileResult { flights: number; updated: number; matched: number; unmatched: number }
 
 function extractImportResult(payload: unknown): ImportResult | null {
 	const candidates: unknown[] = []
@@ -107,6 +112,24 @@ async function runDeleteAll() {
 	}
 }
 
+async function runReconcile() {
+	reconciling.value = true
+	try {
+		const res = await axios.post<{ ocs: { data: ReconcileResult } }>(
+			ocsUrl('/api/v1/flights/reconcile'),
+			{ scope: reconcileAllFlights.value ? 'all' : 'missing' },
+			ocsConfig,
+		)
+		const { flights, updated, matched, unmatched } = res.data.ocs.data
+		showSuccess(`Checked ${flights} flight${flights === 1 ? '' : 's'}: `
+			+ `${matched} airport${matched === 1 ? '' : 's'} matched, ${unmatched} unmatched, ${updated} updated.`)
+	} catch {
+		showError('Airport reconciliation failed')
+	} finally {
+		reconciling.value = false
+	}
+}
+
 async function runExport() {
 	exporting.value = true
 	try {
@@ -172,7 +195,26 @@ async function runExport() {
 			</details>
 		</NcNoteCard>
 
-		<h3 class="export-heading">
+		<h3 class="section-heading">
+			Reconcile airports
+		</h3>
+		<p class="hint">
+			Match the origin and destination text of your flights against the airport
+			reference data, filling in airport codes where an exact match is found.
+		</p>
+		<NcCheckboxRadioSwitch
+			:model-value="reconcileAllFlights"
+			type="switch"
+			@update:model-value="reconcileAllFlights = $event">
+			Re-check all flights (otherwise only flights with no code yet)
+		</NcCheckboxRadioSwitch>
+		<div class="actions">
+			<NcButton variant="secondary" :disabled="reconciling" @click="runReconcile">
+				Reconcile airports
+			</NcButton>
+		</div>
+
+		<h3 class="section-heading">
 			Export
 		</h3>
 		<p class="hint">
@@ -234,7 +276,7 @@ async function runExport() {
 	word-break: break-all;
 }
 
-.export-heading {
+.section-heading {
 	margin-top: 24px;
 }
 

@@ -46,14 +46,14 @@ watch(cabinSelection, (v) => { form.cabinClass = v?.id ?? null })
 async function load() {
 	if (!flightId.value) {
 		showError('Flight not found')
-		router.push('/flights')
+		backToFlights()
 		return
 	}
 	if (!store.loaded) await store.fetchAll()
 	const existing = store.flights.find((f) => f.id === flightId.value)
 	if (!existing) {
 		showError('Flight not found')
-		router.push('/flights')
+		backToFlights()
 		return
 	}
 	Object.assign(form, {
@@ -112,7 +112,7 @@ async function save() {
 	try {
 		await store.update(flightId.value, form)
 		showSuccess('Flight updated')
-		router.push('/flights')
+		backToFlights()
 	} catch (e: unknown) {
 		const message = (e as { response?: { data?: { ocs?: { meta?: { message?: string } } } } })
 			?.response?.data?.ocs?.meta?.message ?? 'Failed to save flight'
@@ -122,8 +122,13 @@ async function save() {
 	}
 }
 
+// Return to the Flights view, preserving any active filter carried in the query.
+function backToFlights() {
+	router.push({ path: '/flights', query: route.query })
+}
+
 function cancel() {
-	router.push('/flights')
+	backToFlights()
 }
 </script>
 

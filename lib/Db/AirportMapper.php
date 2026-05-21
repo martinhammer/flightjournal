@@ -29,6 +29,56 @@ class AirportMapper extends QBMapper {
 		return $this->findEntity($qb);
 	}
 
+	/**
+	 * Find an airport whose IATA or ICAO code equals the given value (case-insensitive).
+	 */
+	public function findOneByCode(string $code): ?Airport {
+		$qb = $this->db->getQueryBuilder();
+		$param = $qb->createNamedParameter(strtolower($code));
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->orX(
+				$qb->expr()->eq($qb->func()->lower('iata'), $param),
+				$qb->expr()->eq($qb->func()->lower('icao'), $param),
+			))
+			->setMaxResults(1);
+		$rows = $this->findEntities($qb);
+		return $rows[0] ?? null;
+	}
+
+	/**
+	 * Find an airport whose name equals the given value (case-insensitive).
+	 */
+	public function findOneByName(string $name): ?Airport {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq(
+				$qb->func()->lower('name'),
+				$qb->createNamedParameter(strtolower($name)),
+			))
+			->setMaxResults(2);
+		$rows = $this->findEntities($qb);
+		return count($rows) === 1 ? $rows[0] : null;
+	}
+
+	/**
+	 * Find airports whose city equals the given value (case-insensitive).
+	 *
+	 * @return Airport[]
+	 */
+	public function findByCity(string $city): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->where($qb->expr()->eq(
+				$qb->func()->lower('city'),
+				$qb->createNamedParameter(strtolower($city)),
+			))
+			->setMaxResults(2);
+		return $this->findEntities($qb);
+	}
+
 	public function deleteAll(): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->delete($this->getTableName());

@@ -84,6 +84,25 @@ class SettingsApiController extends OCSController {
 		return new DataResponse(['deleted' => $count]);
 	}
 
+	/**
+	 * Re-run airport reconciliation across the current user's flights.
+	 *
+	 * @param string $scope 'missing' to only touch flights without a code, 'all' to re-resolve every flight
+	 * @return DataResponse<Http::STATUS_OK, array{flights: int, updated: int, matched: int, unmatched: int}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
+	 *
+	 * 200: Reconciliation completed
+	 * 400: Unknown scope
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'POST', url: '/api/v1/flights/reconcile')]
+	public function reconcile(string $scope = 'missing'): DataResponse {
+		if ($scope !== 'missing' && $scope !== 'all') {
+			return new DataResponse(['message' => "Unknown scope '$scope'"], Http::STATUS_BAD_REQUEST);
+		}
+		$result = $this->flights->reconcileAll($this->getUserId(), $scope === 'missing');
+		return new DataResponse($result);
+	}
+
 	private function getUserId(): string {
 		$user = $this->userSession->getUser();
 		if ($user === null) {

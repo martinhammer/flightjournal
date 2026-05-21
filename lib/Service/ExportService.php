@@ -25,8 +25,8 @@ class ExportService {
 		foreach (array_reverse($flights) as $flight) {
 			$date = str_replace('-', '/', $flight->getFlightDate());
 			$flightNo = ($flight->getAirlineCode() ?? '') . ($flight->getFlightNumber() ?? '');
-			$origin = $flight->getOriginLabel() ?? $flight->getOriginCode() ?? '';
-			$destination = $flight->getDestinationLabel() ?? $flight->getDestinationCode() ?? '';
+			$origin = $flight->getOriginCode() ?? $flight->getOriginLabel() ?? '';
+			$destination = $flight->getDestinationCode() ?? $flight->getDestinationLabel() ?? '';
 			$route = $origin !== '' || $destination !== '' ? "$origin-$destination" : '';
 			$type = $flight->getAircraftTypeRaw() ?? $flight->getAircraftTypeCode() ?? '';
 			$tail = $flight->getRegistration() ?? '';

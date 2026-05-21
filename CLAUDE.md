@@ -36,7 +36,7 @@ Standard Nextcloud app shape. Backend in `lib/` (PHP 8.1+, AppFramework, no Doct
 | `flight_date` | date, indexed | Local departure date. No timezone — it's a journal, not an OPS log. |
 | `origin_code` | varchar(8), nullable | IATA usually, ICAO acceptable. |
 | `destination_code` | varchar(8), nullable | |
-| `origin_label` | varchar(128), nullable | Free-text fallback when no IATA/ICAO exists (e.g. "Meedhupparu"). |
+| `origin_label` | varchar(128), nullable | User's free-text entry; replaced with the reference airport name once reconciliation finds a match. |
 | `destination_label` | varchar(128), nullable | |
 | `airline_code` | varchar(4), nullable | "EY", "EK", "FZ". Split for analytics. |
 | `flight_number` | varchar(8), nullable | Numeric portion only ("449"). |
@@ -54,7 +54,28 @@ Indexes: `(user_id, flight_date)`, `(user_id, airline_code)`, `(user_id, aircraf
 
 **No FKs to reference tables** — flights remain valid even if reference data is missing or stale. This is a hard design principle: the app must be fully usable without enrichment.
 
-**Origin/destination UX:** the Add and Edit screens expose a single "Origin" / "Destination" text field each, written into `origin_label` / `destination_label`. The `origin_code` / `destination_code` columns are populated only by a future backend enrichment step (on save/edit/scheduled job) that recognises an entered string as an IATA/ICAO code and promotes it. UI display prefers `_label`, falling back to `_code` when only the code is present.
+**Origin/destination UX:** the Add and Edit screens expose a single "Origin" / "Destination" text field each, bound to `origin_label` / `destination_label`. The `origin_code` / `destination_code` columns are populated by airport reconciliation (see below). The Flights view route column displays `_code` when present, falling back to `_label`.
+
+### Airport reconciliation
+
+`Service/AirportReconciliationService::resolve(?string $label): ?AirportMatch` resolves a free-text label against `flightjournal_airports`. Matching is strictly **exact and tiered**, never fuzzy:
+
+1. IATA or ICAO code (case-insensitive).
+2. Airport `name` (case-insensitive; ignored if not unique).
+3. `city` (case-insensitive; only if it resolves to exactly one airport).
+
+First hit wins, returning an `AirportMatch` (canonical code + reference name). The canonical code is **IATA when present, else ICAO**. No match — or an ambiguous one — yields `null`; a null `_code` simply means "no confident match" (the design does not distinguish "never checked" from "checked, no match", and does not need to). Flights stay valid regardless.
+
+**On a match, the label is overwritten with the reference airport name** (e.g. typing "LHR" stores `_code` = "LHR", `_label` = "London Heathrow"). The user's verbatim text is intentionally *not* preserved — an accepted tradeoff. A reference row with no name leaves the label untouched.
+
+Reconciliation runs in four places, all delegating to the one resolver:
+
+1. **New flight** — `FlightService::create` resolves both labels on save.
+2. **Edit flight** — `FlightService::update` re-resolves on save.
+3. **Bulk import** — `ImportService` goes through `FlightService::create`, so it is covered automatically.
+4. **Recheck-all** — `FlightService::reconcileAll` + `POST /api/v1/flights/reconcile` (scope `missing` | `all`), triggered from the Personal settings page with a toggle for whether to re-check flights that already have a code.
+
+`applyData` still honours an explicit client-supplied `originCode` / `destinationCode` when present; the SPA never sends them, so in practice codes always come from the resolver. Interactive autocomplete at entry time is a separate, later step.
 
 ### Reference (instance-wide, no `user_id`)
 
@@ -117,6 +138,9 @@ Milestone 1 is complete: code implemented and verified end-to-end against NC 31 
 
 - **Admin settings page** (`Settings/Admin` + `Settings/AdminSection`, mounted via `src/adminSettings.ts` → `views/AdminSettings.vue`) for managing instance-wide reference data.
 - **Airport reference import/delete**: `Db/Airport` + `AirportMapper`, `Service/AirportImportService` (JSON keyed by ICAO, upsert semantics), `Controller/AirportAdminApiController` exposing `POST /api/v1/admin/airports/import`, `DELETE /api/v1/admin/airports`, `GET /api/v1/admin/airports/count`. Admin-only (no `#[NoAdminRequired]`).
+- **Airport browse view**: read-only `views/ViewAirports.vue` (route `/airports`, in the SPA navigation), backed by `Controller/AirportApiController` `GET /api/v1/airports` (paginated, searchable on icao/iata/name/city). Each row has a three-dot menu ("Show flights to / from / to and from `<code>`") that navigates to the Flights view with an airport filter applied.
+- **Flights view filtering**: `ViewFlightLog.vue` reads filters from the route query and shows them as removable `NcChip`s above the table. Filters are modelled generically (`buildFilters()` → `ActiveFilter[]` with `id`, `label`, `queryKeys`, `matches`); the airport filter uses query keys `airport` + `airportDir` (`to` | `from` | `either`). New filter types extend `buildFilters()`; the chip row and clearing are generic over the shape.
+- **Airport reconciliation**: `Service/AirportReconciliationService` wired into flight create/update/import plus a recheck-all action in Personal settings. See "Airport reconciliation" above.
 
 ### Milestone 1 explicit non-goals
 
@@ -125,6 +149,7 @@ Reference data seeding/autocomplete, map, analytics, enrichment, import/export, 
 ## Known scaffold quirks
 
 - `composer.json` pins `nextcloud/ocp: dev-stable31` — keep in sync with `appinfo/info.xml` `min-version`.
+- **Dependabot npm major bumps gated by Nextcloud tooling peers.** Two bumps are parked, not mergeable: vite 7→8 (PR #16) and TypeScript 5→6 (PR #3). Both fail CI at `npm ci` with `ERESOLVE` — not a code issue. `@nextcloud/vite-config@2.5.2` hard-pins `vite: ^7.1.10`; `@nextcloud/eslint-config@8.4.2` hard-pins `typescript: ^5.0.2`. Bump those Nextcloud packages first; the vite/TS bumps follow only once their peer ranges widen. Don't force with `--legacy-peer-deps` (the org-templated `node.yml` workflow would also need editing, and edits there get overwritten).
 
 ## PHPUnit tests — to revisit
 
