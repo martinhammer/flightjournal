@@ -147,6 +147,33 @@ function codeOf(a: Airport): string {
 	return (a.iata || a.icao || '').toUpperCase()
 }
 
+// "12 flights" when no filter is active or shown == total; "5 of 12 flights"
+// when a filter narrows the visible subset.
+function formatCount(shown: number, total: number, filterActive: boolean): string {
+	const plural = (n: number) => `${n} flight${n === 1 ? '' : 's'}`
+	if (!filterActive || shown === total) return plural(total)
+	return `${shown} of ${plural(total)}`
+}
+
+// Multi-line tooltip: bold title above, one or more dim lines below. Built as
+// DOM (not an HTML string) so airport names with special characters don't need
+// escaping.
+function tooltipContent(title: string, lines: string[]): HTMLElement {
+	const el = document.createElement('div')
+	el.className = 'fj-map-tooltip'
+	const t = document.createElement('div')
+	t.className = 'fj-map-tooltip__title'
+	t.textContent = title
+	el.appendChild(t)
+	for (const line of lines) {
+		const c = document.createElement('div')
+		c.className = 'fj-map-tooltip__count'
+		c.textContent = line
+		el.appendChild(c)
+	}
+	return el
+}
+
 // A marker popup offering From / To / Both — applies the airport filter on the
 // Map view itself. Built as plain DOM — Leaflet popups live outside Vue's
 // render tree.
@@ -231,12 +258,18 @@ function drawOverlay() {
 	const byCode = indexByCode(airports.value)
 	const arcColor = themeColor('--color-primary-element', '#1a73e8')
 
-	// Counts span the whole journal, both directions together.
-	const routeCounts = countFlightsByRoute(store.flights)
+	// Totals span the whole journal; filtered counts span only the currently
+	// visible subset. Show both when they differ so the tooltip reads e.g.
+	// "LHR ↔ DXB 3 of 8 flights" while a filter is active.
+	const totalRouteCounts = countFlightsByRoute(store.flights)
+	const filteredRouteCounts = countFlightsByRoute(flights)
+	const filterActive = activeFilters.value.length > 0
 	for (const leg of buildLegs(flights, byCode)) {
 		const a = codeOf(leg.from)
 		const b = codeOf(leg.to)
-		const count = routeCounts.get(routeKey(a, b)) ?? 0
+		const key = routeKey(a, b)
+		const total = totalRouteCounts.get(key) ?? 0
+		const shownCount = filteredRouteCounts.get(key) ?? 0
 		const line = new GeodesicLine(
 			[
 				[leg.from.lat as number, leg.from.lon as number],
@@ -245,7 +278,7 @@ function drawOverlay() {
 			{ color: arcColor, weight: 1.5, opacity: 0.6, steps: 6 },
 		)
 		line.bindTooltip(
-			`${routeKey(a, b).replace('|', ' ↔ ')} ${count} flight${count === 1 ? '' : 's'}`,
+			tooltipContent(key.replace('|', ' ↔ '), [formatCount(shownCount, total, filterActive)]),
 			{ sticky: true },
 		)
 		line.bindPopup(routePopup(leg.from, leg.to))
@@ -253,8 +286,8 @@ function drawOverlay() {
 	}
 
 	const shown = new Set(collectAirportCodes(flights, focusCode.value))
-	// Counts span the whole journal, not just the filtered subset.
-	const flightCounts = countFlightsByAirport(store.flights)
+	const totalAirportCounts = countFlightsByAirport(store.flights)
+	const filteredAirportCounts = countFlightsByAirport(flights)
 	const points: L.LatLng[] = []
 	let focusLatLng: L.LatLng | null = null
 	for (const a of airports.value) {
@@ -262,16 +295,32 @@ function drawOverlay() {
 		if (!shown.has(code) || a.lat === null || a.lon === null) continue
 		const isFocus = focusCode.value !== null && code === focusCode.value
 		const marker = L.circleMarker([a.lat, a.lon], {
-			radius: isFocus ? 7 : 4,
+			radius: isFocus ? 9 : 6,
 			color: isFocus ? arcColor : themeColor('--color-main-text', '#222222'),
 			weight: 2,
 			fillColor: isFocus ? arcColor : themeColor('--color-main-background', '#ffffff'),
 			fillOpacity: 1,
 		})
-		const count = flightCounts.get(code) ?? 0
+		const total = totalAirportCounts.get(code) ?? 0
+		const shownCount = filteredAirportCounts.get(code) ?? 0
 		const base = a.name ? `${code} - ${a.name}` : code
-		marker.bindTooltip(`${base} (${count} flight${count === 1 ? '' : 's'})`)
+		const plural = (n: number) => `${n} flight${n === 1 ? '' : 's'}`
+		// With a filter active: filter label + matching count on line 2, total
+		// on line 3. Without a filter: just the total on line 2.
+		const lines = filterActive
+			? [
+				`${activeFilters.value.map((f) => f.label).join(', ')}: ${shownCount}`,
+				`Total: ${plural(total)}`,
+			]
+			: [plural(total)]
+		marker.bindTooltip(tooltipContent(base, lines))
 		marker.bindPopup(airportPopup(a))
+		// Double-click is a shortcut for the popup's "Flights to and from" action:
+		// focus the airport and apply the bidirectional filter in one gesture.
+		marker.on('dblclick', (e) => {
+			L.DomEvent.stopPropagation(e)
+			router.push({ name: 'map', query: { airport: code, airportDir: 'either' } })
+		})
 		marker.addTo(overlay)
 		const latLng = L.latLng(a.lat, a.lon)
 		points.push(latLng)
@@ -321,6 +370,10 @@ function initMap() {
 		maxZoom: 9,
 		worldCopyJump: cfg.worldCopyJump,
 		attributionControl: false,
+		// Canvas renderer with tolerance adds an N-pixel pad to every path's
+		// hit area without changing how it looks — much easier to hover the
+		// thin geodesic arcs (and gives markers a little extra grace too).
+		renderer: L.canvas({ tolerance: 6 }),
 	})
 
 	// Bundled GeoJSON basemap — no external tile server. prepareBasemap makes
@@ -515,5 +568,14 @@ onBeforeUnmount(() => {
 
 .fj-map-popup__action:hover {
 	background: var(--color-background-hover);
+}
+
+.fj-map-tooltip__title {
+	font-weight: bold;
+}
+
+.fj-map-tooltip__count {
+	color: var(--color-text-maxcontrast);
+	margin-top: 2px;
 }
 </style>
