@@ -131,7 +131,14 @@ describe('ViewFlightLog filtering', () => {
 	it('shows how many flights the filter matches', () => {
 		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
 		const wrapper = render()
-		expect(wrapper.find('.filter-count').text()).toBe('Showing 2 out of 3 flights')
+		// Heading-level count: "<shown> of <total> flights" while a filter narrows.
+		expect(wrapper.find('.filter-count').text()).toBe('2 of 3 flights')
+	})
+
+	it('shows just the total in the heading when no filter is active', () => {
+		routeHolder.query = {}
+		const wrapper = render()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
 	})
 
 	it('carries the active filter to the Map view via "View on map"', async () => {

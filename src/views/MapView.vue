@@ -127,6 +127,14 @@ const anchorCode = computed<string | null>(() => {
 
 const isEmpty = computed(() => !loading.value && airports.value.length === 0)
 
+const headerCount = computed(() => {
+	const total = store.flights.length
+	const shown = filteredFlights.value.length
+	const plural = (n: number) => `${n} flight${n === 1 ? '' : 's'}`
+	if (activeFilters.value.length === 0 || shown === total) return plural(total)
+	return `${shown} of ${plural(total)}`
+})
+
 function clearFilter(filter: ActiveFilter) {
 	const query: LocationQuery = { ...route.query }
 	for (const key of filter.queryKeys) delete query[key]
@@ -452,25 +460,21 @@ onBeforeUnmount(() => {
 	<div class="map-view">
 		<div class="header">
 			<h2>Map</h2>
-			<div v-if="activeFilters.length" class="filter-bar">
-				<div class="filter-chips">
-					<NcChip
-						v-for="filter in activeFilters"
-						:key="filter.id"
-						:text="filter.label"
-						@close="clearFilter(filter)" />
-				</div>
-				<div class="filter-actions">
-					<span class="filter-count">
-						Showing {{ filteredFlights.length }} out of {{ store.flights.length }} flights
-					</span>
-					<NcButton variant="secondary" @click="viewInLog">
-						<template #icon>
-							<FormatListBulleted :size="20" />
-						</template>
-						View in log
-					</NcButton>
-				</div>
+			<div class="filter-bar">
+				<NcChip
+					v-for="filter in activeFilters"
+					:key="filter.id"
+					:text="filter.label"
+					@close="clearFilter(filter)" />
+				<span v-if="!loading" class="filter-count">{{ headerCount }}</span>
+			</div>
+			<div v-if="activeFilters.length" class="filter-actions">
+				<NcButton variant="secondary" @click="viewInLog">
+					<template #icon>
+						<FormatListBulleted :size="20" />
+					</template>
+					View in log
+				</NcButton>
 			</div>
 		</div>
 		<div class="map-area">
@@ -503,27 +507,22 @@ onBeforeUnmount(() => {
 
 .filter-bar {
 	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
+	flex-wrap: wrap;
+	align-items: center;
 	gap: 10px;
 	margin-top: 8px;
-	margin-bottom: 12px;
+	margin-bottom: 6px;
 }
 
-.filter-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
+.filter-count {
+	color: var(--color-text-maxcontrast);
 }
 
 .filter-actions {
 	display: flex;
 	align-items: center;
 	gap: 12px;
-}
-
-.filter-count {
-	color: var(--color-text-maxcontrast);
+	margin-bottom: 12px;
 }
 
 .map-area {

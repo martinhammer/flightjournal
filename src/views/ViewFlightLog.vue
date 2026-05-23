@@ -95,6 +95,14 @@ const sortedFlights = computed<Flight[]>(() => {
 
 const visibleFlights = computed<Flight[]>(() => applyFilters(sortedFlights.value, activeFilters.value))
 
+const headerCount = computed(() => {
+	const total = store.flights.length
+	const shown = visibleFlights.value.length
+	const plural = (n: number) => `${n} flight${n === 1 ? '' : 's'}`
+	if (activeFilters.value.length === 0 || shown === total) return plural(total)
+	return `${shown} of ${plural(total)}`
+})
+
 function setSort(key: SortKey) {
 	if (sortKey.value === key) {
 		sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
@@ -141,32 +149,26 @@ async function remove(f: Flight) {
 
 <template>
 	<div class="view-flight">
-		<div class="header">
-			<h2>Flight log</h2>
-		</div>
+		<h2>Flight log</h2>
 		<div v-if="store.loading && !store.loaded" class="loader">
 			<NcLoadingIcon />
 		</div>
 		<template v-else>
-			<div v-if="activeFilters.length" class="filter-bar">
-				<div class="filter-chips">
-					<NcChip
-						v-for="filter in activeFilters"
-						:key="filter.id"
-						:text="filter.label"
-						@close="clearFilter(filter)" />
-				</div>
-				<div class="filter-actions">
-					<span class="filter-count">
-						Showing {{ visibleFlights.length }} out of {{ store.flights.length }} flights
-					</span>
-					<NcButton variant="secondary" @click="viewOnMap">
-						<template #icon>
-							<Map :size="20" />
-						</template>
-						View on map
-					</NcButton>
-				</div>
+			<div class="filter-bar">
+				<NcChip
+					v-for="filter in activeFilters"
+					:key="filter.id"
+					:text="filter.label"
+					@close="clearFilter(filter)" />
+				<span class="filter-count">{{ headerCount }}</span>
+			</div>
+			<div v-if="activeFilters.length" class="filter-actions">
+				<NcButton variant="secondary" @click="viewOnMap">
+					<template #icon>
+						<Map :size="20" />
+					</template>
+					View on map
+				</NcButton>
 			</div>
 			<NcEmptyContent
 				v-if="store.flights.length === 0"
@@ -238,13 +240,6 @@ async function remove(f: Flight) {
 	padding: 16px;
 }
 
-.header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 16px;
-}
-
 .loader {
 	display: flex;
 	justify-content: center;
@@ -253,26 +248,22 @@ async function remove(f: Flight) {
 
 .filter-bar {
 	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
+	flex-wrap: wrap;
+	align-items: center;
 	gap: 10px;
-	margin-bottom: 16px;
+	margin-top: 8px;
+	margin-bottom: 6px;
 }
 
-.filter-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
+.filter-count {
+	color: var(--color-text-maxcontrast);
 }
 
 .filter-actions {
 	display: flex;
 	align-items: center;
 	gap: 12px;
-}
-
-.filter-count {
-	color: var(--color-text-maxcontrast);
+	margin-bottom: 12px;
 }
 
 .flight-table {
