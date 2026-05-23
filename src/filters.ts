@@ -1,5 +1,5 @@
 import type { LocationQuery } from 'vue-router'
-import type { Flight } from './types.ts'
+import { CABIN_CLASSES, type Flight } from './types.ts'
 
 /**
  * An active filter derived from the route query, shared by the Flights and Map
@@ -20,6 +20,33 @@ export type AirportDirection = 'to' | 'from' | 'either'
 function airportDirection(value: unknown): AirportDirection | null {
 	return value === 'to' || value === 'from' || value === 'either' ? value : null
 }
+
+// Parse a comma-separated query value into a unique uppercase list. Empty
+// strings and whitespace-only entries are skipped.
+function csvParam(value: unknown): string[] {
+	if (typeof value !== 'string') return []
+	return [...new Set(
+		value.split(',')
+			.map((s) => s.trim().toUpperCase())
+			.filter((s) => s !== ''),
+	)]
+}
+
+// Match a YYYY-MM-DD string with light tolerance: returns the string when it
+// parses to a real calendar date, otherwise null. Avoids letting bad query
+// values silently filter everything out.
+function isoDate(value: unknown): string | null {
+	if (typeof value !== 'string') return null
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+	const d = new Date(`${value}T00:00:00Z`)
+	if (Number.isNaN(d.getTime())) return null
+	// Round-trip to catch dates like 2025-02-30 → parses as 2025-03-02.
+	return d.toISOString().slice(0, 10) === value ? value : null
+}
+
+const CABIN_LABELS: Record<string, string> = Object.fromEntries(
+	CABIN_CLASSES.map((c) => [c.value, c.label]),
+)
 
 // Short human description of a single flight for a filter chip. Includes the
 // date so it is clear the filter targets one instance, not every flight with
@@ -76,6 +103,70 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 					return (o === routeA && d === routeB) || (o === routeB && d === routeA)
 				}
 				return o === routeA && d === routeB
+			},
+		})
+	}
+
+	// Date range: a single chip when either endpoint is set; missing side is
+	// rendered as "…" so the user can tell which end is open.
+	const dateFrom = isoDate(query.dateFrom)
+	const dateTo = isoDate(query.dateTo)
+	if (dateFrom || dateTo) {
+		const label = `${dateFrom ?? '…'} → ${dateTo ?? '…'}`
+		filters.push({
+			id: 'date',
+			label,
+			queryKeys: ['dateFrom', 'dateTo'],
+			matches: (f) => {
+				if (dateFrom && f.flightDate < dateFrom) return false
+				if (dateTo && f.flightDate > dateTo) return false
+				return true
+			},
+		})
+	}
+
+	// Cabin class: closed enum, multi-value via CSV. Values that don't match a
+	// known cabin are silently dropped so a broken URL doesn't reject everything.
+	const cabins = csvParam(query.cabin)
+		.map((c) => c.toLowerCase())
+		.filter((c) => c in CABIN_LABELS)
+	if (cabins.length > 0) {
+		const cabinSet = new Set(cabins)
+		const label = `Cabin: ${cabins.map((c) => CABIN_LABELS[c]).join(', ')}`
+		filters.push({
+			id: 'cabin',
+			label,
+			queryKeys: ['cabin'],
+			matches: (f) => f.cabinClass !== null && cabinSet.has(f.cabinClass),
+		})
+	}
+
+	// Airline: free-form CSV (we don't know every possible code up front).
+	const airlines = csvParam(query.airline)
+	if (airlines.length > 0) {
+		const airlineSet = new Set(airlines)
+		filters.push({
+			id: 'airline',
+			label: `Airline: ${airlines.join(', ')}`,
+			queryKeys: ['airline'],
+			matches: (f) => f.airlineCode !== null && airlineSet.has(f.airlineCode.toUpperCase()),
+		})
+	}
+
+	// Aircraft type: same shape as airline. We compare against the table's
+	// display value (raw-then-code) because many flights only have
+	// aircraftTypeRaw populated; the option list in the picker uses the same
+	// fallback so what you see is what you can filter on.
+	const aircraft = csvParam(query.aircraft)
+	if (aircraft.length > 0) {
+		const aircraftSet = new Set(aircraft)
+		filters.push({
+			id: 'aircraft',
+			label: `Aircraft: ${aircraft.join(', ')}`,
+			queryKeys: ['aircraft'],
+			matches: (f) => {
+				const display = f.aircraftTypeRaw ?? f.aircraftTypeCode
+				return display !== null && aircraftSet.has(display.toUpperCase())
 			},
 		})
 	}

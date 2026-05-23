@@ -73,6 +73,96 @@ describe('buildFilters', () => {
 		expect(filters[0].label).toBe('LHR → JFK')
 		expect(filters[0].queryKeys).toEqual(['routeA', 'routeB', 'routeDir'])
 	})
+
+	it('builds a cabin filter from a CSV value, labelling with the display names', () => {
+		const filters = buildFilters({ cabin: 'business,first' })
+		expect(filters).toHaveLength(1)
+		expect(filters[0].id).toBe('cabin')
+		expect(filters[0].label).toBe('Cabin: Business, First')
+		expect(filters[0].queryKeys).toEqual(['cabin'])
+	})
+
+	it('ignores unknown cabin values', () => {
+		expect(buildFilters({ cabin: 'business,sleeper' })[0].label).toBe('Cabin: Business')
+		expect(buildFilters({ cabin: 'sleeper' })).toEqual([])
+	})
+
+	it('builds a date-range filter and renders "…" for the open side', () => {
+		expect(buildFilters({ dateFrom: '2025-01-01', dateTo: '2025-06-30' })[0].label)
+			.toBe('2025-01-01 → 2025-06-30')
+		expect(buildFilters({ dateTo: '2025-06-30' })[0].label).toBe('… → 2025-06-30')
+		expect(buildFilters({ dateFrom: '2025-01-01' })[0].label).toBe('2025-01-01 → …')
+	})
+
+	it('rejects malformed or impossible dates rather than silently filtering everything', () => {
+		expect(buildFilters({ dateFrom: 'yesterday' })).toEqual([])
+		expect(buildFilters({ dateFrom: '2025-02-30' })).toEqual([]) // round-trip catches it
+	})
+
+	it('builds an airline filter (CSV, uppercase)', () => {
+		const filters = buildFilters({ airline: 'ey,ek' })
+		expect(filters).toHaveLength(1)
+		expect(filters[0].id).toBe('airline')
+		expect(filters[0].label).toBe('Airline: EY, EK')
+	})
+
+	it('builds an aircraft-type filter (CSV, uppercase)', () => {
+		const filters = buildFilters({ aircraft: 'b77w,b789' })
+		expect(filters).toHaveLength(1)
+		expect(filters[0].id).toBe('aircraft')
+		expect(filters[0].label).toBe('Aircraft: B77W, B789')
+	})
+
+	it('drops empty or duplicate CSV entries', () => {
+		expect(buildFilters({ airline: ' ,ey, ,ey ' })[0].label).toBe('Airline: EY')
+	})
+})
+
+describe('new filter matchers', () => {
+	const f = (overrides: Partial<Flight>): Flight => ({ ...flight('LHR', 'JFK'), ...overrides })
+
+	it('cabin matches only the selected classes', () => {
+		const list = [
+			f({ id: 1, cabinClass: 'business' }),
+			f({ id: 2, cabinClass: 'first' }),
+			f({ id: 3, cabinClass: 'economy' }),
+			f({ id: 4, cabinClass: null }),
+		]
+		const filtered = applyFilters(list, buildFilters({ cabin: 'business,first' }))
+		expect(filtered.map((x) => x.id).sort()).toEqual([1, 2])
+	})
+
+	it('date range is inclusive on both ends', () => {
+		const list = [
+			f({ id: 1, flightDate: '2024-12-31' }),
+			f({ id: 2, flightDate: '2025-01-01' }),
+			f({ id: 3, flightDate: '2025-06-30' }),
+			f({ id: 4, flightDate: '2025-07-01' }),
+		]
+		const filtered = applyFilters(list, buildFilters({ dateFrom: '2025-01-01', dateTo: '2025-06-30' }))
+		expect(filtered.map((x) => x.id).sort()).toEqual([2, 3])
+	})
+
+	it('airline matches case-insensitively', () => {
+		const list = [
+			f({ id: 1, airlineCode: 'EY' }),
+			f({ id: 2, airlineCode: 'ey' }),
+			f({ id: 3, airlineCode: 'EK' }),
+			f({ id: 4, airlineCode: null }),
+		]
+		const filtered = applyFilters(list, buildFilters({ airline: 'ey' }))
+		expect(filtered.map((x) => x.id).sort()).toEqual([1, 2])
+	})
+
+	it('aircraft matches case-insensitively', () => {
+		const list = [
+			f({ id: 1, aircraftTypeCode: 'B77W' }),
+			f({ id: 2, aircraftTypeCode: 'b789' }),
+			f({ id: 3, aircraftTypeCode: null }),
+		]
+		const filtered = applyFilters(list, buildFilters({ aircraft: 'B789' }))
+		expect(filtered.map((x) => x.id).sort()).toEqual([2])
+	})
 })
 
 describe('route filter matching', () => {

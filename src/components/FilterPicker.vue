@@ -1,0 +1,353 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useRoute, useRouter, type LocationQuery, type LocationQueryValue } from 'vue-router'
+import NcActions from '@nextcloud/vue/components/NcActions'
+import NcActionButton from '@nextcloud/vue/components/NcActionButton'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
+import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNative'
+import NcTextField from '@nextcloud/vue/components/NcTextField'
+import Plus from 'vue-material-design-icons/Plus.vue'
+import { CABIN_CLASSES, type Flight } from '../types.ts'
+
+// The four v1 filter types. All four use the same NcPopover editor surface for
+// a consistent Apply-button style; the NcActions menu only does type selection.
+type FilterType = 'date' | 'cabin' | 'airline' | 'aircraft'
+
+const props = defineProps<{ flights: Flight[] }>()
+
+const route = useRoute()
+const router = useRouter()
+
+// NcActions open state (only used for the filter-type picker).
+const menuOpen = ref(false)
+
+// NcPopover open state and which editor it's currently hosting.
+const editorOpen = ref(false)
+const editorType = ref<FilterType | null>(null)
+
+// Staged editor values. They prefill from the current URL when an editor opens
+// and only commit to the router when the user clicks Apply.
+const stagedCabins = ref<Set<string>>(new Set())
+const stagedDateFrom = ref<Date | null>(null)
+const stagedDateTo = ref<Date | null>(null)
+const stagedAirlines = ref<Set<string>>(new Set())
+const stagedAircraft = ref<Set<string>>(new Set())
+
+// Free-text search applied to the scrollable airline / aircraft checkbox list.
+const airlineSearch = ref('')
+const aircraftSearch = ref('')
+
+// Distinct airline / aircraft codes derived from the user's own flights —
+// option lists until reference data lands.
+const airlineOptions = computed<string[]>(() => distinctCodes(props.flights.map((f) => f.airlineCode)))
+// Aircraft uses raw-then-code to match the table's display value — many flights
+// only have aircraftTypeRaw populated until canonicalisation lands.
+const aircraftOptions = computed<string[]>(() => distinctCodes(
+	props.flights.map((f) => f.aircraftTypeRaw ?? f.aircraftTypeCode),
+))
+
+// Filter the options by the current search term (case-insensitive substring).
+// Staged codes always remain visible so the user can untick them even when the
+// search would otherwise hide them.
+const filteredAirlineOptions = computed(() => filterCodes(airlineOptions.value, airlineSearch.value, stagedAirlines.value))
+const filteredAircraftOptions = computed(() => filterCodes(aircraftOptions.value, aircraftSearch.value, stagedAircraft.value))
+
+function distinctCodes(values: Array<string | null>): string[] {
+	const seen = new Set<string>()
+	for (const v of values) {
+		if (v) seen.add(v.toUpperCase())
+	}
+	return [...seen].sort()
+}
+
+function filterCodes(all: string[], search: string, staged: Set<string>): string[] {
+	const q = search.trim().toUpperCase()
+	if (!q) return all
+	return all.filter((code) => code.includes(q) || staged.has(code))
+}
+
+// Reopening the picker dismisses whatever editor was open. Click on the
+// trigger fires unconditionally — the simplest reliable hook.
+function onTriggerClick() {
+	editorOpen.value = false
+}
+
+// Opening an editor: close the picker menu, prefill staged values from the
+// URL, then open the popover.
+function openEditor(type: FilterType) {
+	editorType.value = type
+	if (type === 'cabin') {
+		stagedCabins.value = new Set(csvFromQuery(route.query.cabin).map((c) => c.toLowerCase()))
+	} else if (type === 'date') {
+		stagedDateFrom.value = parseDate(route.query.dateFrom)
+		stagedDateTo.value = parseDate(route.query.dateTo)
+	} else if (type === 'airline') {
+		stagedAirlines.value = new Set(csvFromQuery(route.query.airline))
+		airlineSearch.value = ''
+	} else {
+		stagedAircraft.value = new Set(csvFromQuery(route.query.aircraft))
+		aircraftSearch.value = ''
+	}
+	menuOpen.value = false
+	editorOpen.value = true
+}
+
+function csvFromQuery(value: LocationQueryValue | LocationQueryValue[] | undefined): string[] {
+	if (typeof value !== 'string') return []
+	return value.split(',').map((s) => s.trim()).filter((s) => s !== '').map((s) => s.toUpperCase())
+}
+
+function parseDate(value: LocationQueryValue | LocationQueryValue[] | undefined): Date | null {
+	if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+	const d = new Date(`${value}T00:00:00`)
+	return Number.isNaN(d.getTime()) ? null : d
+}
+
+function formatDate(d: Date | null): string | undefined {
+	if (!d) return undefined
+	const y = d.getFullYear()
+	const m = String(d.getMonth() + 1).padStart(2, '0')
+	const day = String(d.getDate()).padStart(2, '0')
+	return `${y}-${m}-${day}`
+}
+
+// Push a new query, dropping the given keys when their staged value is empty.
+// `query` carries the keys to set; `drop` carries keys to delete unconditionally.
+function commit(updates: Record<string, string | undefined>) {
+	const query: LocationQuery = { ...route.query }
+	for (const [key, value] of Object.entries(updates)) {
+		if (value === undefined || value === '') delete query[key]
+		else query[key] = value
+	}
+	router.push({ name: 'flights', query })
+}
+
+function applyCabin() {
+	commit({ cabin: [...stagedCabins.value].join(',') || undefined })
+	editorOpen.value = false
+}
+
+function applyDate() {
+	commit({
+		dateFrom: formatDate(stagedDateFrom.value),
+		dateTo: formatDate(stagedDateTo.value),
+	})
+	editorOpen.value = false
+}
+
+function applyAirline() {
+	commit({ airline: [...stagedAirlines.value].join(',') || undefined })
+	editorOpen.value = false
+}
+
+function applyAircraft() {
+	commit({ aircraft: [...stagedAircraft.value].join(',') || undefined })
+	editorOpen.value = false
+}
+
+// NcCheckboxRadioSwitch emits update:modelValue; we manage staged state as a Set.
+function toggleInSet(set: Set<string>, value: string, checked: boolean): Set<string> {
+	const next = new Set(set)
+	if (checked) next.add(value)
+	else next.delete(value)
+	return next
+}
+
+function toggleCabin(value: string, checked: boolean) {
+	stagedCabins.value = toggleInSet(stagedCabins.value, value, checked)
+}
+
+function toggleAirline(value: string, checked: boolean) {
+	stagedAirlines.value = toggleInSet(stagedAirlines.value, value, checked)
+}
+
+function toggleAircraft(value: string, checked: boolean) {
+	stagedAircraft.value = toggleInSet(stagedAircraft.value, value, checked)
+}
+
+// Title shown above the popover editor.
+const editorTitle = computed(() => {
+	switch (editorType.value) {
+	case 'date': return 'Date range'
+	case 'cabin': return 'Cabin class'
+	case 'airline': return 'Airline'
+	case 'aircraft': return 'Aircraft type'
+	default: return ''
+	}
+})
+</script>
+
+<template>
+	<div class="filter-picker">
+		<NcActions
+			:force-menu="true"
+			:open="menuOpen"
+			menu-name="Add filter"
+			@click="onTriggerClick"
+			@update:open="menuOpen = $event">
+			<template #icon>
+				<Plus :size="20" />
+			</template>
+			<NcActionButton :close-after-click="true" @click="openEditor('date')">
+				Date range
+			</NcActionButton>
+			<NcActionButton :close-after-click="true" @click="openEditor('cabin')">
+				Cabin class
+			</NcActionButton>
+			<NcActionButton :close-after-click="true" @click="openEditor('airline')">
+				Airline
+			</NcActionButton>
+			<NcActionButton :close-after-click="true" @click="openEditor('aircraft')">
+				Aircraft type
+			</NcActionButton>
+		</NcActions>
+
+		<div v-if="editorOpen" class="filter-popover">
+			<div class="filter-popover__title">
+				{{ editorTitle }}
+			</div>
+
+			<template v-if="editorType === 'date'">
+				<label class="filter-popover__field">
+					<span>From</span>
+					<NcDateTimePickerNative
+						v-model="stagedDateFrom"
+						type="date" />
+				</label>
+				<label class="filter-popover__field">
+					<span>To</span>
+					<NcDateTimePickerNative
+						v-model="stagedDateTo"
+						type="date" />
+				</label>
+				<div class="filter-popover__actions">
+					<NcButton variant="primary" @click="applyDate">
+						Apply
+					</NcButton>
+				</div>
+			</template>
+
+			<template v-else-if="editorType === 'cabin'">
+				<NcCheckboxRadioSwitch
+					v-for="c in CABIN_CLASSES"
+					:key="c.value"
+					:model-value="stagedCabins.has(c.value)"
+					@update:model-value="(v: boolean) => toggleCabin(c.value, v)">
+					{{ c.label }}
+				</NcCheckboxRadioSwitch>
+				<div class="filter-popover__actions">
+					<NcButton variant="primary" @click="applyCabin">
+						Apply
+					</NcButton>
+				</div>
+			</template>
+
+			<template v-else-if="editorType === 'airline'">
+				<NcTextField
+					:model-value="airlineSearch"
+					label="Search"
+					placeholder="Search airlines"
+					@update:model-value="airlineSearch = String($event)" />
+				<div class="filter-popover__list">
+					<div v-if="filteredAirlineOptions.length === 0" class="filter-popover__empty">
+						No airlines match the search.
+					</div>
+					<NcCheckboxRadioSwitch
+						v-for="code in filteredAirlineOptions"
+						:key="code"
+						:model-value="stagedAirlines.has(code)"
+						@update:model-value="(v: boolean) => toggleAirline(code, v)">
+						{{ code }}
+					</NcCheckboxRadioSwitch>
+				</div>
+				<div class="filter-popover__actions">
+					<NcButton variant="primary" @click="applyAirline">
+						Apply
+					</NcButton>
+				</div>
+			</template>
+
+			<template v-else-if="editorType === 'aircraft'">
+				<NcTextField
+					:model-value="aircraftSearch"
+					label="Search"
+					placeholder="Search aircraft types"
+					@update:model-value="aircraftSearch = String($event)" />
+				<div class="filter-popover__list">
+					<div v-if="filteredAircraftOptions.length === 0" class="filter-popover__empty">
+						No aircraft types match the search.
+					</div>
+					<NcCheckboxRadioSwitch
+						v-for="code in filteredAircraftOptions"
+						:key="code"
+						:model-value="stagedAircraft.has(code)"
+						@update:model-value="(v: boolean) => toggleAircraft(code, v)">
+						{{ code }}
+					</NcCheckboxRadioSwitch>
+				</div>
+				<div class="filter-popover__actions">
+					<NcButton variant="primary" @click="applyAircraft">
+						Apply
+					</NcButton>
+				</div>
+			</template>
+		</div>
+	</div>
+</template>
+
+<style scoped>
+.filter-picker {
+	position: relative;
+	display: inline-block;
+}
+
+.filter-popover {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 1000;
+	padding: 12px;
+	min-width: 260px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	background: var(--color-main-background);
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-large, 12px);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.filter-popover__title {
+	font-weight: bold;
+}
+
+.filter-popover__field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.filter-popover__field > span {
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+}
+
+.filter-popover__list {
+	max-height: 240px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.filter-popover__empty {
+	color: var(--color-text-maxcontrast);
+	padding: 4px 0;
+}
+
+.filter-popover__actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 4px;
+}
+</style>

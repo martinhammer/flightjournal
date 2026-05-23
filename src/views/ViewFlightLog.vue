@@ -13,6 +13,7 @@ import Pencil from 'vue-material-design-icons/Pencil.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import { showConfirmation, showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
+import FilterPicker from '../components/FilterPicker.vue'
 import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
 import { CABIN_CLASSES, type Flight } from '../types.ts'
 import Map from 'vue-material-design-icons/Map.vue'
@@ -155,6 +156,7 @@ async function remove(f: Flight) {
 		</div>
 		<template v-else>
 			<div class="filter-bar">
+				<FilterPicker :flights="store.flights" />
 				<NcChip
 					v-for="filter in activeFilters"
 					:key="filter.id"

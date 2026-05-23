@@ -77,6 +77,8 @@ const stubs = {
 	Pencil: true,
 	TrashCan: true,
 	Map: true,
+	// FilterPicker is covered by its own spec; stub here to keep this file focused.
+	FilterPicker: true,
 }
 
 function render() {
