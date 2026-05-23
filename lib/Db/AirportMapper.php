@@ -113,9 +113,13 @@ class AirportMapper extends QBMapper {
 	}
 
 	/**
+	 * When $codes is non-null, restrict to airports whose IATA or ICAO code is
+	 * in the list (case-insensitive); an empty list matches nothing.
+	 *
+	 * @param list<string>|null $codes
 	 * @return Airport[]
 	 */
-	public function search(?string $q, int $limit, int $offset): array {
+	public function search(?string $q, int $limit, int $offset, ?array $codes = null): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')
 			->from($this->getTableName())
@@ -124,14 +128,19 @@ class AirportMapper extends QBMapper {
 			->setMaxResults($limit)
 			->setFirstResult($offset);
 		$this->applySearch($qb, $q);
+		$this->applyCodes($qb, $codes);
 		return $this->findEntities($qb);
 	}
 
-	public function countSearch(?string $q): int {
+	/**
+	 * @param list<string>|null $codes See {@see search()}.
+	 */
+	public function countSearch(?string $q, ?array $codes = null): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select($qb->func()->count('*', 'cnt'))
 			->from($this->getTableName());
 		$this->applySearch($qb, $q);
+		$this->applyCodes($qb, $codes);
 		$result = $qb->executeQuery();
 		/** @var array<string, mixed>|false $row */
 		$row = $result->fetch();
@@ -157,6 +166,29 @@ class AirportMapper extends QBMapper {
 			$qb->expr()->like($qb->func()->lower('iata'), $param),
 			$qb->expr()->like($qb->func()->lower('name'), $param),
 			$qb->expr()->like($qb->func()->lower('city'), $param),
+		));
+	}
+
+	/**
+	 * @param list<string>|null $codes
+	 */
+	private function applyCodes(IQueryBuilder $qb, ?array $codes): void {
+		if ($codes === null) {
+			return;
+		}
+		if ($codes === []) {
+			// Restricted to an empty set — match nothing.
+			$qb->andWhere($qb->expr()->eq(
+				$qb->createNamedParameter(0, IQueryBuilder::PARAM_INT),
+				$qb->createNamedParameter(1, IQueryBuilder::PARAM_INT),
+			));
+			return;
+		}
+		$lower = array_values(array_unique(array_map('strtolower', $codes)));
+		$param = $qb->createNamedParameter($lower, IQueryBuilder::PARAM_STR_ARRAY);
+		$qb->andWhere($qb->expr()->orX(
+			$qb->expr()->in($qb->func()->lower('iata'), $param),
+			$qb->expr()->in($qb->func()->lower('icao'), $param),
 		));
 	}
 }

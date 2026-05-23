@@ -44,11 +44,12 @@ export interface AirportPage {
 	offset: number
 }
 
-export async function listAirports(q: string, limit: number, offset: number): Promise<AirportPage> {
+export async function listAirports(q: string, limit: number, offset: number, flownOnly = true): Promise<AirportPage> {
 	const params = new URLSearchParams()
 	if (q.trim()) params.set('q', q.trim())
 	params.set('limit', String(limit))
 	params.set('offset', String(offset))
+	params.set('flownOnly', flownOnly ? 'true' : 'false')
 	const res = await axios.get<OcsResponse<AirportPage>>(url(`/api/v1/airports?${params.toString()}`), config)
 	return res.data.ocs.data
 }

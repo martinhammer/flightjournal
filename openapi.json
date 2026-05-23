@@ -361,6 +361,15 @@
                         }
                     },
                     {
+                        "name": "flownOnly",
+                        "in": "query",
+                        "description": "When true, restrict to the user's flown airports",
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    },
+                    {
                         "name": "OCS-APIRequest",
                         "in": "header",
                         "description": "Required to be true for the API request to pass",

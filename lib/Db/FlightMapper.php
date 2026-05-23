@@ -31,6 +31,35 @@ class FlightMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	/**
+	 * Distinct origin/destination codes across all of a user's flights.
+	 *
+	 * @return list<string>
+	 */
+	public function findFlownAirportCodes(string $userId): array {
+		$codes = [];
+		foreach (['origin_code', 'destination_code'] as $column) {
+			$qb = $this->db->getQueryBuilder();
+			$qb->selectDistinct($column)
+				->from($this->getTableName())
+				->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+				->andWhere($qb->expr()->isNotNull($column));
+			$result = $qb->executeQuery();
+			while (true) {
+				/** @var array<string, mixed>|false $row */
+				$row = $result->fetch();
+				if ($row === false) {
+					break;
+				}
+				if (is_string($row[$column]) && $row[$column] !== '') {
+					$codes[$row[$column]] = true;
+				}
+			}
+			$result->closeCursor();
+		}
+		return array_keys($codes);
+	}
+
 	public function deleteAllForUser(string $userId): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->delete($this->getTableName())

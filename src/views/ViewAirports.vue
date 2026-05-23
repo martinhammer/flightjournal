@@ -7,6 +7,7 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import AirplaneLanding from 'vue-material-design-icons/AirplaneLanding.vue'
 import AirplaneTakeoff from 'vue-material-design-icons/AirplaneTakeoff.vue'
 import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
@@ -20,6 +21,8 @@ const router = useRouter()
 const PAGE_SIZE = 100
 
 const query = ref('')
+// Default: only airports the current user has flown to/from.
+const showAll = ref(false)
 const offset = ref(0)
 const total = ref(0)
 const items = ref<Airport[]>([])
@@ -32,7 +35,7 @@ async function fetchPage() {
 	const token = ++searchToken
 	loading.value = true
 	try {
-		const page = await listAirports(query.value, PAGE_SIZE, offset.value)
+		const page = await listAirports(query.value, PAGE_SIZE, offset.value, !showAll.value)
 		if (token !== searchToken) return
 		items.value = page.items
 		total.value = page.total
@@ -53,6 +56,22 @@ watch(query, () => {
 		offset.value = 0
 		fetchPage()
 	}, 250)
+})
+
+watch(showAll, () => {
+	offset.value = 0
+	fetchPage()
+})
+
+const emptyName = computed(() => {
+	if (query.value) return 'No matches'
+	return showAll.value ? 'No airports yet' : 'No flown airports yet'
+})
+
+const emptyDescription = computed(() => {
+	if (query.value) return 'Try a different search term.'
+	if (showAll.value) return 'An administrator can import airport reference data from the admin settings.'
+	return 'Add flights to your log, or enable "Show all airports" to browse the full reference database.'
 })
 
 const pageStart = computed(() => total.value === 0 ? 0 : offset.value + 1)
@@ -97,8 +116,14 @@ function showOnMap(a: Airport) {
 
 <template>
 	<div class="view-airports">
-		<div class="header">
-			<h2>Airports</h2>
+		<h2>Airports</h2>
+		<div class="controls">
+			<NcCheckboxRadioSwitch
+				:model-value="showAll"
+				type="switch"
+				@update:model-value="showAll = Boolean($event)">
+				Show all airports
+			</NcCheckboxRadioSwitch>
 			<NcTextField
 				:model-value="query"
 				label="Search"
@@ -112,8 +137,8 @@ function showOnMap(a: Airport) {
 		</div>
 		<NcEmptyContent
 			v-else-if="loaded && items.length === 0"
-			:name="query ? 'No matches' : 'No airports yet'"
-			:description="query ? 'Try a different search term.' : 'An administrator can import airport reference data from the admin settings.'" />
+			:name="emptyName"
+			:description="emptyDescription" />
 		<template v-else>
 			<table class="airport-table">
 				<thead>
@@ -190,13 +215,12 @@ function showOnMap(a: Airport) {
 	padding: 16px;
 }
 
-.header {
+.controls {
 	display: flex;
-	justify-content: space-between;
-	align-items: end;
-	gap: 16px;
-	margin-bottom: 16px;
-	flex-wrap: wrap;
+	flex-direction: column;
+	align-items: start;
+	gap: 12px;
+	margin: 12px 0 16px;
 }
 
 .search {

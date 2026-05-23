@@ -22,10 +22,17 @@ const NcActionButton = {
 	template: '<button class="action" @click="$emit(\'click\')"><slot /></button>',
 }
 
+const NcCheckboxRadioSwitch = {
+	props: ['modelValue'],
+	emits: ['update:modelValue'],
+	template: '<button class="switch" @click="$emit(\'update:modelValue\', !modelValue)"><slot /></button>',
+}
+
 const stubs = {
 	NcTextField: true,
 	NcActions,
 	NcActionButton,
+	NcCheckboxRadioSwitch,
 	NcEmptyContent: true,
 	NcLoadingIcon: true,
 	NcButton: true,
@@ -58,10 +65,10 @@ afterEach(() => {
 })
 
 describe('ViewAirports search', () => {
-	it('fetches the first page on mount', async () => {
+	it('fetches the first page on mount, restricted to flown airports', async () => {
 		mount(ViewAirports, { global: { stubs } })
 		await flushPromises()
-		expect(listAirports).toHaveBeenLastCalledWith('', 100, 0)
+		expect(listAirports).toHaveBeenLastCalledWith('', 100, 0, true)
 	})
 
 	it('queries the backend with the typed search term', async () => {
@@ -74,7 +81,19 @@ describe('ViewAirports search', () => {
 		vi.advanceTimersByTime(250)
 		await flushPromises()
 
-		expect(listAirports).toHaveBeenLastCalledWith('LHR', 100, 0)
+		expect(listAirports).toHaveBeenLastCalledWith('LHR', 100, 0, true)
+	})
+})
+
+describe('ViewAirports show-all toggle', () => {
+	it('refetches without the flown-only restriction when enabled', async () => {
+		const wrapper = mount(ViewAirports, { global: { stubs } })
+		await flushPromises()
+
+		await wrapper.find('.switch').trigger('click')
+		await flushPromises()
+
+		expect(listAirports).toHaveBeenLastCalledWith('', 100, 0, false)
 	})
 })
 

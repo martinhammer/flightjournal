@@ -14,6 +14,14 @@ import MapMarkerOff from 'vue-material-design-icons/MapMarkerOff.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
 import { showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
+import { useMapSettingsStore, type Projection } from '../store/mapSettings.ts'
+import {
+	azimuthalEquidistantCRS,
+	azimuthalFitZoom,
+	pickHomeAirport,
+	polarNorthFitZoom,
+	polarStereographicNorthCRS,
+} from '../mapProjections.ts'
 import { getAirportsByCodes } from '../api.ts'
 import {
 	buildLegs,
@@ -31,10 +39,60 @@ import type { Airport } from '../types.ts'
 const route = useRoute()
 const router = useRouter()
 const store = useFlightsStore()
+const mapSettings = useMapSettingsStore()
 
 const loading = ref(true)
 const airports = ref<Airport[]>([])
 const mapEl = ref<HTMLElement | null>(null)
+
+// Experimental: switch between projections. The first three are Leaflet built-
+// ins (flat, 2D). 'polar-north' and 'azimuthal-home' come from proj4leaflet
+// (see src/mapProjections.ts) and can be removed without affecting the others.
+// The selected projection lives in the mapSettings store so the Settings entry
+// in the app navigation can change it from outside this view.
+interface MapConfig {
+	crs: L.CRS
+	center: L.LatLngExpression
+	zoom: number
+	minZoom: number
+	worldCopyJump: boolean
+}
+// Resolve the AEQD centre: filter anchor (airport / route origin / flight
+// origin) takes precedence over the most-flown airport. Falls back to (0,0) if
+// nothing is known yet.
+function azimuthalCenter(): [number, number] {
+	const code = anchorCode.value
+	const anchored = code
+		? airports.value.find((a) => codeOf(a) === code && a.lat !== null && a.lon !== null) ?? null
+		: null
+	const anchor = anchored ?? pickHomeAirport(store.flights, airports.value)
+	return anchor && anchor.lat !== null && anchor.lon !== null
+		? [anchor.lat, anchor.lon]
+		: [0, 0]
+}
+
+function configFor(p: Projection): MapConfig {
+	switch (p) {
+	case 'equirectangular':
+		return { crs: L.CRS.EPSG4326, center: [25, 10], zoom: 1, minZoom: 0, worldCopyJump: false }
+	case 'mercator':
+		return { crs: L.CRS.EPSG3395, center: [25, 10], zoom: 2, minZoom: 1, worldCopyJump: false }
+	case 'polar-north':
+		return { crs: polarStereographicNorthCRS(), center: [90, 0], zoom: 0, minZoom: 0, worldCopyJump: false }
+	case 'azimuthal-home': {
+		const center = azimuthalCenter()
+		return {
+			crs: azimuthalEquidistantCRS(center[0], center[1]),
+			center,
+			zoom: 3,
+			minZoom: 2,
+			worldCopyJump: false,
+		}
+	}
+	default:
+		return { crs: L.CRS.EPSG3857, center: [25, 10], zoom: 2, minZoom: 1, worldCopyJump: true }
+	}
+}
 
 // Leaflet objects are deliberately kept out of Vue reactivity.
 let map: L.Map | null = null
@@ -47,6 +105,24 @@ const filteredFlights = computed(() => applyFilters(store.flights, activeFilters
 const focusCode = computed(() => {
 	const a = route.query.airport
 	return typeof a === 'string' && a ? a.toUpperCase() : null
+})
+
+// The airport AEQD should re-centre on when a filter is active. Mirrors
+// focusCode for the airport filter, then falls through to route filters
+// (origin airport, i.e. routeA) and single-flight filters (the flight's
+// origin_code). Used only for projection centring, not for the focus marker
+// highlight (which keeps following focusCode alone).
+const anchorCode = computed<string | null>(() => {
+	if (focusCode.value) return focusCode.value
+	const ra = route.query.routeA
+	if (typeof ra === 'string' && ra) return ra.toUpperCase()
+	const f = route.query.flight
+	if (typeof f === 'string' && f) {
+		const id = Number(f)
+		const flight = store.flights.find((x) => x.id === id)
+		if (flight?.originCode) return flight.originCode.toUpperCase()
+	}
+	return null
 })
 
 const isEmpty = computed(() => !loading.value && airports.value.length === 0)
@@ -204,6 +280,21 @@ function drawOverlay() {
 
 	if (activeFilters.value.length === 0 && focusLatLng) {
 		map.setView(focusLatLng, 6)
+	} else if (mapSettings.projection === 'polar-north' && points.length > 0) {
+		// Polar projection: keep the pole centred, just scale to fit.
+		const viewportPx = Math.min(
+			mapEl.value?.clientWidth ?? 800,
+			mapEl.value?.clientHeight ?? 800,
+		)
+		map.setView([90, 0], polarNorthFitZoom(points, viewportPx))
+	} else if (mapSettings.projection === 'azimuthal-home' && points.length > 0) {
+		// AEQD: keep the projection centre at the viewport centre, scale to fit.
+		const viewportPx = Math.min(
+			mapEl.value?.clientWidth ?? 800,
+			mapEl.value?.clientHeight ?? 800,
+		)
+		const center = azimuthalCenter()
+		map.setView(center, azimuthalFitZoom(points, center, viewportPx))
 	} else if (points.length > 0) {
 		map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 7 })
 	}
@@ -212,12 +303,23 @@ function drawOverlay() {
 function initMap() {
 	if (!mapEl.value || map) return
 
+	let cfg: MapConfig
+	try {
+		cfg = configFor(mapSettings.projection)
+	} catch (e) {
+		// proj4leaflet failure — fall back to Web Mercator and surface why.
+		console.warn('[flightjournal] Projection failed, falling back to Web Mercator:', e)
+		showError('That projection could not be loaded; falling back to Web Mercator.')
+		mapSettings.projection = 'web-mercator'
+		cfg = configFor('web-mercator')
+	}
 	map = L.map(mapEl.value, {
-		center: [25, 10],
-		zoom: 2,
-		minZoom: 1,
+		crs: cfg.crs,
+		center: cfg.center,
+		zoom: cfg.zoom,
+		minZoom: cfg.minZoom,
 		maxZoom: 9,
-		worldCopyJump: true,
+		worldCopyJump: cfg.worldCopyJump,
 		attributionControl: false,
 	})
 
@@ -257,8 +359,33 @@ onMounted(async () => {
 })
 
 // React to filter changes (e.g. clearing the chip) without a full remount.
-watch(() => route.query, () => {
-	if (map) drawOverlay()
+// Exception: Azimuthal Equidistant re-centres on the filter anchor (airport,
+// route origin, or flight origin), and the centre is baked into the CRS — so
+// a change in the anchor needs a full map rebuild.
+let lastAnchor: string | null = anchorCode.value
+watch(() => route.query, async () => {
+	if (!map) return
+	if (mapSettings.projection === 'azimuthal-home' && anchorCode.value !== lastAnchor) {
+		lastAnchor = anchorCode.value
+		map.remove()
+		map = null
+		overlay = null
+		await nextTick()
+		initMap()
+		return
+	}
+	lastAnchor = anchorCode.value
+	drawOverlay()
+})
+
+// Leaflet bakes the CRS in at construction — swap projections by rebuilding.
+watch(() => mapSettings.projection, async () => {
+	if (!map) return
+	map.remove()
+	map = null
+	overlay = null
+	await nextTick()
+	initMap()
 })
 
 onBeforeUnmount(() => {
