@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQuery, type LocationQueryValue } from 'vue-router'
 import NcActions from '@nextcloud/vue/components/NcActions'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
@@ -72,6 +72,34 @@ function filterCodes(all: string[], search: string, staged: Set<string>): string
 function onTriggerClick() {
 	editorOpen.value = false
 }
+
+function cancelEditor() {
+	editorOpen.value = false
+}
+
+// Root element of the picker; used to detect clicks outside the editor so we
+// can dismiss it without an explicit Cancel click. The editor is a plain
+// absolutely-positioned div (not an NcPopover), so we wire this ourselves.
+const rootEl = ref<HTMLElement | null>(null)
+
+function onDocumentPointerDown(event: PointerEvent) {
+	if (!editorOpen.value) return
+	const target = event.target as Node | null
+	if (target && rootEl.value && rootEl.value.contains(target)) return
+	editorOpen.value = false
+}
+
+watch(editorOpen, (open) => {
+	if (open) {
+		document.addEventListener('pointerdown', onDocumentPointerDown, true)
+	} else {
+		document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+	}
+})
+
+onBeforeUnmount(() => {
+	document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+})
 
 // Opening an editor: close the picker menu, prefill staged values from the
 // URL, then open the popover.
@@ -179,7 +207,7 @@ const editorTitle = computed(() => {
 </script>
 
 <template>
-	<div class="filter-picker">
+	<div ref="rootEl" class="filter-picker">
 		<NcActions
 			:force-menu="true"
 			:open="menuOpen"
@@ -222,6 +250,9 @@ const editorTitle = computed(() => {
 						type="date" />
 				</label>
 				<div class="filter-popover__actions">
+					<NcButton @click="cancelEditor">
+						Cancel
+					</NcButton>
 					<NcButton variant="primary" @click="applyDate">
 						Apply
 					</NcButton>
@@ -237,6 +268,9 @@ const editorTitle = computed(() => {
 					{{ c.label }}
 				</NcCheckboxRadioSwitch>
 				<div class="filter-popover__actions">
+					<NcButton @click="cancelEditor">
+						Cancel
+					</NcButton>
 					<NcButton variant="primary" @click="applyCabin">
 						Apply
 					</NcButton>
@@ -262,6 +296,9 @@ const editorTitle = computed(() => {
 					</NcCheckboxRadioSwitch>
 				</div>
 				<div class="filter-popover__actions">
+					<NcButton @click="cancelEditor">
+						Cancel
+					</NcButton>
 					<NcButton variant="primary" @click="applyAirline">
 						Apply
 					</NcButton>
@@ -287,6 +324,9 @@ const editorTitle = computed(() => {
 					</NcCheckboxRadioSwitch>
 				</div>
 				<div class="filter-popover__actions">
+					<NcButton @click="cancelEditor">
+						Cancel
+					</NcButton>
 					<NcButton variant="primary" @click="applyAircraft">
 						Apply
 					</NcButton>
@@ -348,6 +388,7 @@ const editorTitle = computed(() => {
 .filter-popover__actions {
 	display: flex;
 	justify-content: flex-end;
+	gap: 8px;
 	margin-top: 4px;
 }
 </style>

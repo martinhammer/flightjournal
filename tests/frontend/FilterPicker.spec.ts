@@ -77,9 +77,11 @@ const NcCheckboxRadioSwitch = defineComponent({
 })
 
 const NcButton = defineComponent({
+	props: ['variant'],
 	emits: ['click'],
 	render() {
-		return h('button', { class: 'apply-btn', onClick: () => this.$emit('click') }, this.$slots.default?.())
+		const cls = this.variant === 'primary' ? 'apply-btn' : 'cancel-btn'
+		return h('button', { class: cls, onClick: () => this.$emit('click') }, this.$slots.default?.())
 	},
 })
 
@@ -157,6 +159,30 @@ describe('FilterPicker — cabin', () => {
 		await checkboxes[2].setValue(false)
 		await wrapper.find('.apply-btn').trigger('click')
 		expect(push).toHaveBeenCalledWith({ name: 'flights', query: {} })
+	})
+})
+
+describe('FilterPicker — dismissal', () => {
+	it('closes the editor without committing when Cancel is clicked', async () => {
+		const wrapper = render()
+		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await flushPromises()
+		expect(wrapper.find('.cancel-btn').exists()).toBe(true)
+		await wrapper.find('.cancel-btn').trigger('click')
+		expect(push).not.toHaveBeenCalled()
+		expect(wrapper.find('.cancel-btn').exists()).toBe(false)
+	})
+
+	it('closes the editor when the user clicks outside the picker', async () => {
+		const wrapper = render()
+		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await flushPromises()
+		expect(wrapper.find('.cancel-btn').exists()).toBe(true)
+		// pointerdown outside the root
+		document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+		await flushPromises()
+		expect(wrapper.find('.cancel-btn').exists()).toBe(false)
+		expect(push).not.toHaveBeenCalled()
 	})
 })
 
