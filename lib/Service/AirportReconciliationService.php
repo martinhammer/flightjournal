@@ -52,7 +52,7 @@ class AirportReconciliationService {
 		if ($name !== null && trim($name) === '') {
 			$name = null;
 		}
-		return new AirportMatch($this->canonicalCode($match), $name);
+		return new AirportMatch($this->canonicalCode($match), $name, $match->getLat(), $match->getLon());
 	}
 
 	private function canonicalCode(Airport $airport): ?string {

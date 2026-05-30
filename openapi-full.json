@@ -37,6 +37,7 @@
                     "cabinClass",
                     "seat",
                     "notes",
+                    "distanceKm",
                     "createdAt",
                     "updatedAt"
                 ],
@@ -94,6 +95,11 @@
                     },
                     "notes": {
                         "type": "string",
+                        "nullable": true
+                    },
+                    "distanceKm": {
+                        "type": "integer",
+                        "format": "int64",
                         "nullable": true
                     },
                     "createdAt": {

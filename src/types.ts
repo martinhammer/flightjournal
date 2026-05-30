@@ -13,11 +13,12 @@ export interface Flight {
 	cabinClass: string | null
 	seat: string | null
 	notes: string | null
+	distanceKm: number | null
 	createdAt: number
 	updatedAt: number
 }
 
-export type FlightInput = Omit<Flight, 'id' | 'createdAt' | 'updatedAt'>
+export type FlightInput = Omit<Flight, 'id' | 'distanceKm' | 'createdAt' | 'updatedAt'>
 
 export interface Airport {
 	id: number

@@ -46,6 +46,7 @@ Standard Nextcloud app shape. Backend in `lib/` (PHP 8.1+, AppFramework, no Doct
 | `cabin_class` | varchar(16), nullable | Enum: `economy`, `premium_economy`, `business`, `first`, `other`. |
 | `seat` | varchar(8), nullable | "12A". |
 | `notes` | text, nullable | |
+| `distance_km` | integer, nullable | Great-circle distance between the two reconciled airports, whole km. Derived field (not enrichment cache): recomputed by reconciliation, `NULL` unless both endpoints resolve to reference coordinates. |
 | `created_at`, `updated_at` | bigint (unix seconds) | |
 
 Indexes: `(user_id, flight_date)`, `(user_id, airline_code)`, `(user_id, aircraft_type_code)`.
@@ -76,6 +77,8 @@ Reconciliation runs in four places, all delegating to the one resolver:
 4. **Recheck-all** — `FlightService::reconcileAll` + `POST /api/v1/flights/reconcile` (scope `missing` | `all`), triggered from the Personal settings page with a toggle for whether to re-check flights that already have a code.
 
 `applyData` still honours an explicit client-supplied `originCode` / `destinationCode` when present; the SPA never sends them, so in practice codes always come from the resolver. Interactive autocomplete at entry time is a separate, later step.
+
+**Distance** is computed in the same breath as reconciliation. `AirportMatch` carries the reference `lat`/`lon`, and `FlightService` sets `distance_km` via `Service/GreatCircle::distanceKm()` (pure haversine, whole km) whenever **both** endpoints resolve to coordinates — otherwise `NULL`. It is a deterministic derived field, not provider/cache data, so it lives as a column rather than in `flightjournal_enrichments`. In `create`/`update` (and import) both endpoints are always resolved, so distance tracks the current route. In `reconcileAll` distance is only recomputed when both sides are resolved in the pass; a side skipped under `missing` scope leaves the existing distance untouched. Existing flights are backfilled by running recheck-all with scope `all`.
 
 ### Reference (instance-wide, no `user_id`)
 

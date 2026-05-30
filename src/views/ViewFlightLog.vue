@@ -18,7 +18,7 @@ import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
 import { CABIN_CLASSES, type Flight } from '../types.ts'
 import Map from 'vue-material-design-icons/Map.vue'
 
-type SortKey = 'date' | 'flight' | 'route' | 'aircraft' | 'registration' | 'cabin' | 'seat'
+type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
 type SortDir = 'asc' | 'desc'
 
 const cabinLabels: Record<string, string> = Object.fromEntries(
@@ -56,6 +56,7 @@ const columns: { key: SortKey; label: string; defaultDir: SortDir }[] = [
 	{ key: 'date', label: 'Date', defaultDir: 'desc' },
 	{ key: 'flight', label: 'Flight', defaultDir: 'asc' },
 	{ key: 'route', label: 'Route', defaultDir: 'asc' },
+	{ key: 'distance', label: 'Distance (km)', defaultDir: 'desc' },
 	{ key: 'aircraft', label: 'Aircraft', defaultDir: 'asc' },
 	{ key: 'registration', label: 'Reg.', defaultDir: 'asc' },
 	{ key: 'cabin', label: 'Cabin', defaultDir: 'asc' },
@@ -70,6 +71,9 @@ function sortValue(f: Flight, key: SortKey): string {
 		return `${f.airlineCode ?? ''}${(f.flightNumber ?? '').padStart(6, '0')}`
 	case 'route':
 		return routeLabel(f).toLowerCase()
+	case 'distance':
+		// Zero-padded so the string sort orders numerically; unknowns sort lowest.
+		return String(f.distanceKm ?? 0).padStart(6, '0')
 	case 'aircraft':
 		return (f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '').toLowerCase()
 	case 'registration':
@@ -183,7 +187,7 @@ async function remove(f: Flight) {
 			<table v-else class="flight-table">
 				<thead>
 					<tr>
-						<th v-for="col in columns" :key="col.key" :class="{ sorted: sortKey === col.key }">
+						<th v-for="col in columns" :key="col.key" :class="{ sorted: sortKey === col.key, numeric: col.key === 'distance' }">
 							<button
 								type="button"
 								class="sort-button"
@@ -204,6 +208,9 @@ async function remove(f: Flight) {
 						<td>{{ f.flightDate }}</td>
 						<td>{{ flightNo(f) }}</td>
 						<td>{{ routeLabel(f) }}</td>
+						<td class="numeric">
+							{{ f.distanceKm?.toLocaleString() ?? '' }}
+						</td>
 						<td>{{ f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '' }}</td>
 						<td>{{ f.registration ?? '' }}</td>
 						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
@@ -287,6 +294,23 @@ async function remove(f: Flight) {
 
 .flight-table th.sorted {
 	color: var(--color-main-text);
+}
+
+.flight-table th.numeric,
+.flight-table td.numeric {
+	text-align: end;
+	white-space: nowrap;
+	/* Breathing room before the Aircraft column. */
+	padding-inline-end: 24px;
+}
+
+.flight-table td.numeric {
+	font-variant-numeric: tabular-nums;
+}
+
+/* Right-align the sort button so the header sits directly above the figures. */
+.flight-table th.numeric .sort-button {
+	margin-inline: 0 -6px;
 }
 
 .sort-button {

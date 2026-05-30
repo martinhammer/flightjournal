@@ -20,6 +20,7 @@ namespace OCA\FlightJournal;
  *     cabinClass: ?string,
  *     seat: ?string,
  *     notes: ?string,
+ *     distanceKm: ?int,
  *     createdAt: int,
  *     updatedAt: int,
  * }

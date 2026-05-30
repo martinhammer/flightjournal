@@ -35,6 +35,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setSeat(?string $seat)
  * @method string|null getNotes()
  * @method void setNotes(?string $notes)
+ * @method int|null getDistanceKm()
+ * @method void setDistanceKm(?int $distanceKm)
  * @method int getCreatedAt()
  * @method void setCreatedAt(int $createdAt)
  * @method int getUpdatedAt()
@@ -58,10 +60,12 @@ class Flight extends Entity implements \JsonSerializable {
 	protected ?string $cabinClass = null;
 	protected ?string $seat = null;
 	protected ?string $notes = null;
+	protected ?int $distanceKm = null;
 	protected int $createdAt = 0;
 	protected int $updatedAt = 0;
 
 	public function __construct() {
+		$this->addType('distanceKm', 'integer');
 		$this->addType('createdAt', 'integer');
 		$this->addType('updatedAt', 'integer');
 	}
@@ -82,6 +86,7 @@ class Flight extends Entity implements \JsonSerializable {
 	 *     cabinClass: ?string,
 	 *     seat: ?string,
 	 *     notes: ?string,
+	 *     distanceKm: ?int,
 	 *     createdAt: int,
 	 *     updatedAt: int,
 	 * }
@@ -102,6 +107,7 @@ class Flight extends Entity implements \JsonSerializable {
 			'cabinClass' => $this->cabinClass,
 			'seat' => $this->seat,
 			'notes' => $this->notes,
+			'distanceKm' => $this->distanceKm,
 			'createdAt' => $this->createdAt,
 			'updatedAt' => $this->updatedAt,
 		];

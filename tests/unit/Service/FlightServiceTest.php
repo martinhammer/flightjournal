@@ -271,6 +271,94 @@ class FlightServiceTest extends TestCase {
 		$this->assertNull($captured->getDestinationCode());
 	}
 
+	public function testCreateComputesDistanceWhenBothEndpointsHaveCoords(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup', 55.618, 12.656)],
+			['London', new AirportMatch('LHR', 'London Heathrow', 51.47, -0.4543)],
+		]);
+
+		$this->service->create('alice', $this->validData());
+
+		// CPH → LHR great circle is ~955 km.
+		$this->assertEqualsWithDelta(955, $captured->getDistanceKm(), 30);
+	}
+
+	public function testCreateLeavesDistanceNullWhenAnEndpointUnresolved(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup', 55.618, 12.656)],
+			['London', null],
+		]);
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertNull($captured->getDistanceKm());
+	}
+
+	public function testCreateLeavesDistanceNullWhenMatchHasNoCoords(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		// Matches without lat/lon (e.g. reference row lacks coords).
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup')],
+			['London', new AirportMatch('LHR', 'London Heathrow')],
+		]);
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertNull($captured->getDistanceKm());
+	}
+
+	public function testReconcileAllRecomputesDistanceWhenBothSidesResolve(): void {
+		$flight = new Flight();
+		$flight->setOriginLabel('Copenhagen');
+		$flight->setDestinationLabel('London');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup', 55.618, 12.656)],
+			['London', new AirportMatch('LHR', 'London Heathrow', 51.47, -0.4543)],
+		]);
+		$this->mapper->expects($this->once())->method('update')->willReturnArgument(0);
+
+		$result = $this->service->reconcileAll('alice', false);
+
+		$this->assertSame(1, $result['updated']);
+		$this->assertEqualsWithDelta(955, $flight->getDistanceKm(), 30);
+	}
+
+	public function testReconcileAllOnlyMissingLeavesDistanceUntouchedForSkippedSide(): void {
+		// Origin already coded → skipped under onlyMissing, so distance can't be
+		// recomputed (only one side resolved); the existing value is preserved.
+		$flight = new Flight();
+		$flight->setOriginLabel('Copenhagen');
+		$flight->setOriginCode('CPH');
+		$flight->setDestinationLabel('Nowhere');
+		$flight->setDistanceKm(1234);
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Nowhere', null],
+		]);
+		$this->mapper->expects($this->never())->method('update');
+
+		$this->service->reconcileAll('alice', true);
+
+		$this->assertSame(1234, $flight->getDistanceKm());
+	}
+
 	public function testReconcileAllOnlyMissingSkipsFlightsWithCode(): void {
 		$withCode = new Flight();
 		$withCode->setOriginLabel('Copenhagen');

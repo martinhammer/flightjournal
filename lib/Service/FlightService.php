@@ -79,13 +79,20 @@ class FlightService {
 
 		foreach ($flights as $flight) {
 			$changed = false;
+			// Distance is only recomputed when both sides are resolved in this
+			// pass; a side skipped under $onlyMissing leaves the distance as-is.
+			$originMatch = null;
+			$destMatch = null;
+			$originResolved = false;
+			$destResolved = false;
 
 			if ($flight->getOriginLabel() !== null
 				&& !($onlyMissing && $flight->getOriginCode() !== null)) {
-				$match = $this->reconciler->resolve($flight->getOriginLabel());
-				$match === null ? $unmatched++ : $matched++;
+				$originResolved = true;
+				$originMatch = $this->reconciler->resolve($flight->getOriginLabel());
+				$originMatch === null ? $unmatched++ : $matched++;
 				[$label, $code, $sideChanged] = $this->reapplyMatch(
-					$match, $flight->getOriginLabel(), $flight->getOriginCode(),
+					$originMatch, $flight->getOriginLabel(), $flight->getOriginCode(),
 				);
 				if ($sideChanged) {
 					$flight->setOriginLabel($label);
@@ -96,14 +103,26 @@ class FlightService {
 
 			if ($flight->getDestinationLabel() !== null
 				&& !($onlyMissing && $flight->getDestinationCode() !== null)) {
-				$match = $this->reconciler->resolve($flight->getDestinationLabel());
-				$match === null ? $unmatched++ : $matched++;
+				$destResolved = true;
+				$destMatch = $this->reconciler->resolve($flight->getDestinationLabel());
+				$destMatch === null ? $unmatched++ : $matched++;
 				[$label, $code, $sideChanged] = $this->reapplyMatch(
-					$match, $flight->getDestinationLabel(), $flight->getDestinationCode(),
+					$destMatch, $flight->getDestinationLabel(), $flight->getDestinationCode(),
 				);
 				if ($sideChanged) {
 					$flight->setDestinationLabel($label);
 					$flight->setDestinationCode($code);
+					$changed = true;
+				}
+			}
+
+			if ($originResolved && $destResolved) {
+				$distance = $this->distanceKm(
+					$originMatch?->lat, $originMatch?->lon,
+					$destMatch?->lat, $destMatch?->lon,
+				);
+				if ($distance !== $flight->getDistanceKm()) {
+					$flight->setDistanceKm($distance);
 					$changed = true;
 				}
 			}
@@ -150,12 +169,13 @@ class FlightService {
 	private function applyData(Flight $flight, array $data): void {
 		$flight->setFlightDate((string)$this->str($data, 'flightDate'));
 
-		[$originLabel, $originCode] = $this->resolveEndpoint($data, 'originLabel', 'originCode');
-		[$destinationLabel, $destinationCode] = $this->resolveEndpoint($data, 'destinationLabel', 'destinationCode');
+		[$originLabel, $originCode, $originLat, $originLon] = $this->resolveEndpoint($data, 'originLabel', 'originCode');
+		[$destinationLabel, $destinationCode, $destLat, $destLon] = $this->resolveEndpoint($data, 'destinationLabel', 'destinationCode');
 		$flight->setOriginLabel($originLabel);
 		$flight->setOriginCode($originCode);
 		$flight->setDestinationLabel($destinationLabel);
 		$flight->setDestinationCode($destinationCode);
+		$flight->setDistanceKm($this->distanceKm($originLat, $originLon, $destLat, $destLon));
 		$flight->setAirlineCode($this->upper($this->str($data, 'airlineCode')));
 		$flight->setFlightNumber($this->str($data, 'flightNumber'));
 		$flight->setAircraftTypeCode($this->upper($this->str($data, 'aircraftTypeCode')));
@@ -176,21 +196,31 @@ class FlightService {
 	 * preserved). A reference row without a name leaves the label untouched.
 	 *
 	 * @param array<array-key, mixed> $data
-	 * @return array{0: ?string, 1: ?string} [label, code]
+	 * @return array{0: ?string, 1: ?string, 2: ?float, 3: ?float} [label, code, lat, lon]
 	 */
 	private function resolveEndpoint(array $data, string $labelKey, string $codeKey): array {
 		$label = $this->str($data, $labelKey);
 
 		$explicitCode = $this->upper($this->str($data, $codeKey));
 		if ($explicitCode !== null) {
-			return [$label, $explicitCode];
+			return [$label, $explicitCode, null, null];
 		}
 
 		$match = $this->reconciler->resolve($label);
 		if ($match === null) {
-			return [$label, null];
+			return [$label, null, null, null];
 		}
-		return [$match->name ?? $label, $match->code];
+		return [$match->name ?? $label, $match->code, $match->lat, $match->lon];
+	}
+
+	/**
+	 * Whole-km great-circle distance, or null unless both endpoints have coords.
+	 */
+	private function distanceKm(?float $lat1, ?float $lon1, ?float $lat2, ?float $lon2): ?int {
+		if ($lat1 === null || $lon1 === null || $lat2 === null || $lon2 === null) {
+			return null;
+		}
+		return GreatCircle::distanceKm($lat1, $lon1, $lat2, $lon2);
 	}
 
 	/**

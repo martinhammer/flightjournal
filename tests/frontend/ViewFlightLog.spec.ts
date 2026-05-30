@@ -24,7 +24,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 
 import ViewFlightLog from '../../src/views/ViewFlightLog.vue'
 
-function flight(id: number, originCode: string, destinationCode: string) {
+function flight(id: number, originCode: string, destinationCode: string, distanceKm: number | null = null) {
 	return {
 		id,
 		flightDate: `2026-01-0${id}`,
@@ -40,6 +40,7 @@ function flight(id: number, originCode: string, destinationCode: string) {
 		cabinClass: null,
 		seat: null,
 		notes: null,
+		distanceKm,
 		createdAt: 0,
 		updatedAt: 0,
 	}
@@ -90,9 +91,9 @@ beforeEach(() => {
 	routeHolder.query = {}
 	// f1 LHR→JFK, f2 JFK→LHR, f3 CPH→LHR
 	store.flights = [
-		flight(1, 'LHR', 'JFK'),
-		flight(2, 'JFK', 'LHR'),
-		flight(3, 'CPH', 'LHR'),
+		flight(1, 'LHR', 'JFK', 5555),
+		flight(2, 'JFK', 'LHR', 5555),
+		flight(3, 'CPH', 'LHR', 955),
 	]
 })
 
@@ -165,5 +166,31 @@ describe('ViewFlightLog filtering', () => {
 		const firstRowActions = wrapper.findAll('tbody tr')[0].findAll('.row-action')
 		await firstRowActions[0].trigger('click')
 		expect(push).toHaveBeenCalledWith({ name: 'map', query: { flight: '3' } })
+	})
+})
+
+describe('ViewFlightLog distance column', () => {
+	// Distance cell is the 4th column (date, flight, route, distance, …).
+	const distanceCells = (wrapper: ReturnType<typeof render>) =>
+		wrapper.findAll('tbody tr').map((r) => r.findAll('td')[3].text().replace(/\D/g, ''))
+
+	it('sorts numerically by distance, not lexically', async () => {
+		const wrapper = render()
+		const distanceHeader = wrapper.findAll('th .sort-button')[3]
+		expect(distanceHeader.text()).toContain('Distance (km)')
+
+		// First click uses the column's desc default → longest first.
+		await distanceHeader.trigger('click')
+		expect(distanceCells(wrapper)).toEqual(['5555', '5555', '955'])
+
+		// Toggling flips to ascending → shortest first.
+		await distanceHeader.trigger('click')
+		expect(distanceCells(wrapper)).toEqual(['955', '5555', '5555'])
+	})
+
+	it('renders an empty cell when distance is unknown', () => {
+		store.flights = [flight(1, 'AAA', 'BBB', null)]
+		const wrapper = render()
+		expect(wrapper.find('tbody tr td.numeric').text()).toBe('')
 	})
 })
