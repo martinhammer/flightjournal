@@ -35,6 +35,19 @@ export function buildLegs(flights: Flight[], byCode: Map<string, Airport>): MapL
 	return legs
 }
 
+// Great-circle (haversine) distance in whole km. Mirrors the backend formula
+// in lib/Service/GreatCircle.php so on-screen values match the persisted one.
+export function greatCircleKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+	const R = 6371.0088
+	const toRad = (d: number) => d * Math.PI / 180
+	const dLat = toRad(lat2 - lat1)
+	const dLon = toRad(lon2 - lon1)
+	const a = Math.sin(dLat / 2) ** 2
+		+ Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+	return Math.round(R * c)
+}
+
 // Number of journal flights involving each airport code (as origin OR
 // destination), keyed by uppercased code. Each flight counts once per airport.
 export function countFlightsByAirport(flights: Flight[]): Map<string, number> {

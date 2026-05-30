@@ -5,6 +5,7 @@ import {
 	countFlightsByAirport,
 	countFlightsByRoute,
 	flownRouteDirections,
+	greatCircleKm,
 	indexByCode,
 	orderedRouteDirections,
 	prepareBasemap,
@@ -205,5 +206,22 @@ describe('prepareBasemap', () => {
 		expect(out.features[0].properties?.name).toBe('Russia')
 		const ring = (out.features[0].geometry as { coordinates: number[][][] }).coordinates[0]
 		expect(ring.map((p) => p[0])).toEqual([170, 190, 170])
+	})
+})
+
+describe('greatCircleKm', () => {
+	it('is zero for identical points', () => {
+		expect(greatCircleKm(51.47, -0.4543, 51.47, -0.4543)).toBe(0)
+	})
+
+	it('returns ~10008 km for a quarter of the equator', () => {
+		expect(greatCircleKm(0, 0, 0, 90)).toBeGreaterThanOrEqual(10006)
+		expect(greatCircleKm(0, 0, 0, 90)).toBeLessThanOrEqual(10010)
+	})
+
+	it('matches the backend formula for a known city pair (LHR → JFK ≈ 5555 km)', () => {
+		const d = greatCircleKm(51.47, -0.4543, 40.6413, -73.7781)
+		expect(d).toBeGreaterThanOrEqual(5525)
+		expect(d).toBeLessThanOrEqual(5585)
 	})
 })

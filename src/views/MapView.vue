@@ -29,6 +29,7 @@ import {
 	countFlightsByAirport,
 	countFlightsByRoute,
 	flownRouteDirections,
+	greatCircleKm,
 	indexByCode,
 	prepareBasemap,
 	routeKey,
@@ -285,8 +286,15 @@ function drawOverlay() {
 			],
 			{ color: arcColor, weight: 1.5, opacity: 0.6, steps: 6 },
 		)
+		const distance = greatCircleKm(
+			leg.from.lat as number, leg.from.lon as number,
+			leg.to.lat as number, leg.to.lon as number,
+		)
 		line.bindTooltip(
-			tooltipContent(key.replace('|', ' ↔ '), [formatCount(shownCount, total, filterActive)]),
+			tooltipContent(key.replace('|', ' ↔ '), [
+				formatCount(shownCount, total, filterActive),
+				`${distance.toLocaleString()} km`,
+			]),
 			{ sticky: true },
 		)
 		line.bindPopup(routePopup(leg.from, leg.to))
