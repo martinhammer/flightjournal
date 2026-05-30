@@ -22,7 +22,7 @@
     "@nextcloud/initial-state": "^3.0.0",
     "@nextcloud/paths": "^3.1.0",
     "@nextcloud/router": "^3.1.0",
-    "@nextcloud/vue": "^9.8.0",
+    "@nextcloud/vue": "^9.8.1",
     "@types/proj4": "^2.5.6",
     "@types/proj4leaflet": "^1.0.12",
     "geojson-antimeridian-cut": "^0.1.0",
