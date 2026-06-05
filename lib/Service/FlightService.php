@@ -40,6 +40,8 @@ class FlightService {
 		$flight = new Flight();
 		$flight->setUserId($userId);
 		$this->applyData($flight, $data);
+		// Append to the end of its day; relative order is all that matters.
+		$flight->setDaySeq($this->mapper->maxDaySeqForDate($userId, $flight->getFlightDate()) + 1);
 		$now = $this->time->getTime();
 		$flight->setCreatedAt($now);
 		$flight->setUpdatedAt($now);
@@ -49,9 +51,47 @@ class FlightService {
 	public function update(int $id, string $userId, array $data): Flight {
 		$flight = $this->find($id, $userId);
 		$this->validate($data);
+		$oldDate = $flight->getFlightDate();
 		$this->applyData($flight, $data);
+		if ($flight->getFlightDate() !== $oldDate) {
+			// Re-dated onto a different day: append to the end of the new day. The
+			// old day keeps its gap (harmless — only relative order matters).
+			$flight->setDaySeq($this->mapper->maxDaySeqForDate($userId, $flight->getFlightDate()) + 1);
+		}
 		$flight->setUpdatedAt($this->time->getTime());
 		return $this->mapper->update($flight);
+	}
+
+	/**
+	 * Move a flight one position within its day by swapping day_seq with the
+	 * adjacent same-day leg. A no-op (returns the flight unchanged) when it is
+	 * already first/last in its day.
+	 *
+	 * Direction is expressed in day order, not screen position: "earlier" moves
+	 * toward leg 1 (lower day_seq), "later" away from it. The view translates its
+	 * up/down chevron into one of these based on the active sort direction.
+	 *
+	 * @param string $direction Either "earlier" or "later".
+	 */
+	public function move(int $id, string $userId, string $direction): Flight {
+		if ($direction !== 'earlier' && $direction !== 'later') {
+			throw new ValidationException('direction must be "earlier" or "later"');
+		}
+		$flight = $this->find($id, $userId);
+		$neighbor = $this->mapper->findSwapNeighbor($flight, $direction);
+		if ($neighbor === null) {
+			return $flight;
+		}
+
+		$flightSeq = $flight->getDaySeq();
+		$flight->setDaySeq($neighbor->getDaySeq());
+		$neighbor->setDaySeq($flightSeq);
+		$now = $this->time->getTime();
+		$flight->setUpdatedAt($now);
+		$neighbor->setUpdatedAt($now);
+		$this->mapper->update($neighbor);
+		$this->mapper->update($flight);
+		return $flight;
 	}
 
 	public function delete(int $id, string $userId): void {

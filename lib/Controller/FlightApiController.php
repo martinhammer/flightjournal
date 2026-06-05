@@ -169,6 +169,30 @@ class FlightApiController extends OCSController {
 	}
 
 	/**
+	 * Move a flight one position within its day (swap order with the adjacent leg)
+	 *
+	 * @param int $id Flight id
+	 * @param string $direction Move in day order: earlier (toward leg 1) or later
+	 * @return DataResponse<Http::STATUS_OK, FlightJournalFlight, array{}>|DataResponse<Http::STATUS_NOT_FOUND, array{message: string}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
+	 *
+	 * 200: Flight moved (or already at the end; returned unchanged)
+	 * 400: Invalid direction
+	 * 404: Flight not found
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'POST', url: '/api/v1/flights/{id}/move')]
+	public function move(int $id, string $direction): DataResponse {
+		try {
+			$flight = $this->service->move($id, $this->getUserId(), $direction);
+			return new DataResponse($flight->jsonSerialize());
+		} catch (NotFoundException $e) {
+			return new DataResponse(['message' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+		} catch (ValidationException $e) {
+			return new DataResponse(['message' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+		}
+	}
+
+	/**
 	 * Delete a flight
 	 *
 	 * @param int $id Flight id

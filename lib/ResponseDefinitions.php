@@ -8,6 +8,7 @@ namespace OCA\FlightJournal;
  * @psalm-type FlightJournalFlight = array{
  *     id: int,
  *     flightDate: string,
+ *     daySeq: int,
  *     originCode: ?string,
  *     destinationCode: ?string,
  *     originLabel: ?string,

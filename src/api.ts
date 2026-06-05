@@ -37,6 +37,13 @@ export async function deleteFlight(id: number): Promise<void> {
 	await axios.delete(url(`/api/v1/flights/${id}`), config)
 }
 
+export type MoveDirection = 'earlier' | 'later'
+
+export async function moveFlight(id: number, direction: MoveDirection): Promise<Flight> {
+	const res = await axios.post<OcsResponse<Flight>>(url(`/api/v1/flights/${id}/move`), { direction }, config)
+	return res.data.ocs.data
+}
+
 export interface AirportPage {
 	items: Airport[]
 	total: number

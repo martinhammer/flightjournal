@@ -188,6 +188,107 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame(1700000000, $result->getUpdatedAt(), 'updatedAt refreshed');
 	}
 
+	public function testCreateAppendsToEndOfDay(): void {
+		$captured = null;
+		$this->mapper->method('maxDaySeqForDate')->with('alice', '2026-05-01')->willReturn(2);
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertSame(3, $captured->getDaySeq(), 'next leg appended after the existing two');
+	}
+
+	public function testCreateFirstLegOfDayGetsSeqOne(): void {
+		$captured = null;
+		// Default mock return for maxDaySeqForDate is 0 (no flights that day yet).
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+
+		$this->service->create('alice', $this->validData());
+
+		$this->assertSame(1, $captured->getDaySeq());
+	}
+
+	public function testUpdateReappendsWhenDateChanges(): void {
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-01-01');
+		$existing->setDaySeq(1);
+
+		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->mapper->expects($this->once())
+			->method('maxDaySeqForDate')
+			->with('alice', '2026-05-01')
+			->willReturn(4);
+
+		$result = $this->service->update(7, 'alice', $this->validData());
+
+		$this->assertSame(5, $result->getDaySeq(), 're-dated leg appended to the new day');
+	}
+
+	public function testUpdateKeepsDaySeqWhenDateUnchanged(): void {
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-05-01');
+		$existing->setDaySeq(3);
+
+		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->mapper->expects($this->never())->method('maxDaySeqForDate');
+
+		$result = $this->service->update(7, 'alice', $this->validData(['notes' => 'same day edit']));
+
+		$this->assertSame(3, $result->getDaySeq(), 'editing other fields leaves order untouched');
+	}
+
+	public function testMoveSwapsDaySeqWithNeighbor(): void {
+		$flight = new Flight();
+		$flight->setUserId('alice');
+		$flight->setFlightDate('2026-05-01');
+		$flight->setDaySeq(2);
+
+		$neighbor = new Flight();
+		$neighbor->setUserId('alice');
+		$neighbor->setFlightDate('2026-05-01');
+		$neighbor->setDaySeq(1);
+
+		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($flight);
+		$this->mapper->method('findSwapNeighbor')->with($flight, 'earlier')->willReturn($neighbor);
+		$this->mapper->expects($this->exactly(2))->method('update')->willReturnArgument(0);
+
+		$result = $this->service->move(7, 'alice', 'earlier');
+
+		$this->assertSame(1, $result->getDaySeq(), 'moved flight takes the neighbor seq');
+		$this->assertSame(2, $neighbor->getDaySeq(), 'neighbor takes the moved flight seq');
+	}
+
+	public function testMoveIsNoOpAtEdgeOfDay(): void {
+		$flight = new Flight();
+		$flight->setUserId('alice');
+		$flight->setFlightDate('2026-05-01');
+		$flight->setDaySeq(1);
+
+		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($flight);
+		$this->mapper->method('findSwapNeighbor')->with($flight, 'earlier')->willReturn(null);
+		$this->mapper->expects($this->never())->method('update');
+
+		$result = $this->service->move(7, 'alice', 'earlier');
+
+		$this->assertSame(1, $result->getDaySeq(), 'order unchanged when already first');
+	}
+
+	public function testMoveRejectsBadDirection(): void {
+		$this->mapper->expects($this->never())->method('findForUser');
+		$this->expectException(ValidationException::class);
+		$this->service->move(7, 'alice', 'sideways');
+	}
+
 	public function testUpdateThrowsNotFoundForOtherUser(): void {
 		$this->mapper->method('findForUser')->willThrowException(new DoesNotExistException('nope'));
 		$this->expectException(NotFoundException::class);

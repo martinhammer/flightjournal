@@ -11,6 +11,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void setUserId(string $userId)
  * @method string getFlightDate()
  * @method void setFlightDate(string $flightDate)
+ * @method int getDaySeq()
+ * @method void setDaySeq(int $daySeq)
  * @method string|null getOriginCode()
  * @method void setOriginCode(?string $originCode)
  * @method string|null getDestinationCode()
@@ -48,6 +50,7 @@ use OCP\AppFramework\Db\Entity;
 class Flight extends Entity implements \JsonSerializable {
 	protected string $userId = '';
 	protected string $flightDate = '';
+	protected int $daySeq = 0;
 	protected ?string $originCode = null;
 	protected ?string $destinationCode = null;
 	protected ?string $originLabel = null;
@@ -65,6 +68,7 @@ class Flight extends Entity implements \JsonSerializable {
 	protected int $updatedAt = 0;
 
 	public function __construct() {
+		$this->addType('daySeq', 'integer');
 		$this->addType('distanceKm', 'integer');
 		$this->addType('createdAt', 'integer');
 		$this->addType('updatedAt', 'integer');
@@ -74,6 +78,7 @@ class Flight extends Entity implements \JsonSerializable {
 	 * @return array{
 	 *     id: int,
 	 *     flightDate: string,
+	 *     daySeq: int,
 	 *     originCode: ?string,
 	 *     destinationCode: ?string,
 	 *     originLabel: ?string,
@@ -95,6 +100,7 @@ class Flight extends Entity implements \JsonSerializable {
 		return [
 			'id' => $this->id,
 			'flightDate' => $this->flightDate,
+			'daySeq' => $this->daySeq,
 			'originCode' => $this->originCode,
 			'destinationCode' => $this->destinationCode,
 			'originLabel' => $this->originLabel,

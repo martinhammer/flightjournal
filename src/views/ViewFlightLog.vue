@@ -7,6 +7,8 @@ import NcButton from '@nextcloud/vue/components/NcButton'
 import NcChip from '@nextcloud/vue/components/NcChip'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
+import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
 import MenuDown from 'vue-material-design-icons/MenuDown.vue'
 import MenuUp from 'vue-material-design-icons/MenuUp.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
@@ -93,12 +95,44 @@ const sortedFlights = computed<Flight[]>(() => {
 		const bv = sortValue(b, sortKey.value)
 		if (av < bv) return -1 * dir
 		if (av > bv) return 1 * dir
+		// Within a day, follow the date direction by day_seq so the newest day's
+		// last leg sits on top (and the oldest day's first leg leads when ascending).
+		if (sortKey.value === 'date' && a.daySeq !== b.daySeq) return (a.daySeq - b.daySeq) * dir
 		return a.id - b.id
 	})
 	return list
 })
 
 const visibleFlights = computed<Flight[]>(() => applyFilters(sortedFlights.value, activeFilters.value))
+
+// Within-day reordering only makes sense in the natural date-sorted, unfiltered
+// view — otherwise the visual neighbour isn't the day-order neighbour.
+const canReorder = computed(() => sortKey.value === 'date' && activeFilters.value.length === 0)
+
+function sameDayPrev(i: number): boolean {
+	const list = visibleFlights.value
+	return i > 0 && list[i - 1].flightDate === list[i].flightDate
+}
+
+function sameDayNext(i: number): boolean {
+	const list = visibleFlights.value
+	return i < list.length - 1 && list[i + 1].flightDate === list[i].flightDate
+}
+
+const canMoveUp = (i: number) => canReorder.value && sameDayPrev(i)
+const canMoveDown = (i: number) => canReorder.value && sameDayNext(i)
+const hasDaySiblings = (i: number) => canReorder.value && (sameDayPrev(i) || sameDayNext(i))
+
+// Translate the visual chevron into a day-order move. With the newest day on top
+// (date desc) the up chevron pushes a leg later in the day; ascending flips it.
+async function move(f: Flight, isUp: boolean) {
+	const direction = isUp === (sortDir.value === 'desc') ? 'later' : 'earlier'
+	try {
+		await store.move(f.id, direction)
+	} catch {
+		showError('Failed to reorder flight')
+	}
+}
 
 const headerCount = computed(() => {
 	const total = store.flights.length
@@ -201,10 +235,11 @@ async function remove(f: Flight) {
 							</button>
 						</th>
 						<th />
+						<th />
 					</tr>
 				</thead>
 				<tbody>
-					<tr v-for="f in visibleFlights" :key="f.id">
+					<tr v-for="(f, i) in visibleFlights" :key="f.id">
 						<td>{{ f.flightDate }}</td>
 						<td>{{ flightNo(f) }}</td>
 						<td>{{ routeLabel(f) }}</td>
@@ -215,6 +250,28 @@ async function remove(f: Flight) {
 						<td>{{ f.registration ?? '' }}</td>
 						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
 						<td>{{ f.seat ?? '' }}</td>
+						<td class="reorder">
+							<template v-if="hasDaySiblings(i)">
+								<NcButton
+									variant="tertiary-no-background"
+									:disabled="!canMoveUp(i)"
+									aria-label="Move up within the day"
+									@click="move(f, true)">
+									<template #icon>
+										<ChevronUp :size="20" />
+									</template>
+								</NcButton>
+								<NcButton
+									variant="tertiary-no-background"
+									:disabled="!canMoveDown(i)"
+									aria-label="Move down within the day"
+									@click="move(f, false)">
+									<template #icon>
+										<ChevronDown :size="20" />
+									</template>
+								</NcButton>
+							</template>
+						</td>
 						<td class="actions">
 							<NcActions :force-menu="true">
 								<NcActionButton @click="viewFlightOnMap(f)">
@@ -340,5 +397,17 @@ async function remove(f: Flight) {
 .actions {
 	display: flex;
 	gap: 4px;
+}
+
+.flight-table td.reorder {
+	white-space: nowrap;
+	width: 1px;
+	padding-inline: 0;
+}
+
+.flight-table td.reorder :deep(.button-vue) {
+	/* Tighten the two chevrons so they read as a single control. */
+	min-height: 32px;
+	min-width: 32px;
 }
 </style>

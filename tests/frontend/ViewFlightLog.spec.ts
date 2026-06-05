@@ -10,6 +10,7 @@ const { store, push, routeHolder } = vi.hoisted(() => ({
 		loading: false,
 		fetchAll: vi.fn(),
 		remove: vi.fn(),
+		move: vi.fn(),
 	},
 	push: vi.fn(),
 	routeHolder: { query: {} as Record<string, string> },
@@ -75,6 +76,8 @@ const stubs = {
 	NcLoadingIcon: true,
 	MenuUp: true,
 	MenuDown: true,
+	ChevronUp: true,
+	ChevronDown: true,
 	Pencil: true,
 	TrashCan: true,
 	Map: true,
@@ -88,6 +91,7 @@ function render() {
 
 beforeEach(() => {
 	push.mockClear()
+	store.move.mockClear()
 	routeHolder.query = {}
 	// f1 LHR→JFK, f2 JFK→LHR, f3 CPH→LHR
 	store.flights = [
@@ -192,5 +196,71 @@ describe('ViewFlightLog distance column', () => {
 		store.flights = [flight(1, 'AAA', 'BBB', null)]
 		const wrapper = render()
 		expect(wrapper.find('tbody tr td.numeric').text()).toBe('')
+	})
+})
+
+describe('ViewFlightLog within-day reordering', () => {
+	// Three legs on the same day, daySeq 1..3. Default sort is date desc, so the
+	// rows read top→bottom as the latest leg first: seq 3, seq 2, seq 1.
+	function sameDay(id: number, daySeq: number) {
+		return { ...flight(id, 'AAA', 'BBB'), flightDate: '2026-03-15', daySeq }
+	}
+
+	const reorderButtons = (wrapper: ReturnType<typeof render>, rowIndex: number) =>
+		wrapper.findAll('tbody tr')[rowIndex].findAll('td.reorder .nc-button')
+
+	beforeEach(() => {
+		store.flights = [sameDay(1, 1), sameDay(2, 2), sameDay(3, 3)]
+	})
+
+	it('shows no reorder chevrons when each day has a single leg', () => {
+		// The default distinct-date fixture: one flight per day.
+		store.flights = [flight(1, 'AAA', 'BBB'), flight(2, 'CCC', 'DDD')]
+		const wrapper = render()
+		expect(wrapper.findAll('td.reorder .nc-button')).toHaveLength(0)
+	})
+
+	it('renders up/down chevrons for a multi-leg day', () => {
+		const wrapper = render()
+		// Two chevrons per row × three rows.
+		expect(wrapper.findAll('td.reorder .nc-button')).toHaveLength(6)
+	})
+
+	it('disables up on the top leg and down on the bottom leg', () => {
+		const wrapper = render()
+		// Row 0 is the latest leg (top): cannot move further up.
+		expect(reorderButtons(wrapper, 0)[0].attributes('disabled')).toBeDefined()
+		expect(reorderButtons(wrapper, 0)[1].attributes('disabled')).toBeUndefined()
+		// Row 2 is the earliest leg (bottom): cannot move further down.
+		expect(reorderButtons(wrapper, 2)[0].attributes('disabled')).toBeUndefined()
+		expect(reorderButtons(wrapper, 2)[1].attributes('disabled')).toBeDefined()
+	})
+
+	it('moving a leg up sends "later" under newest-first sort', async () => {
+		const wrapper = render()
+		// Middle row is flight id 2 (seq 2). Up chevron → later in the day.
+		await reorderButtons(wrapper, 1)[0].trigger('click')
+		expect(store.move).toHaveBeenCalledWith(2, 'later')
+	})
+
+	it('moving a leg down sends "earlier" under newest-first sort', async () => {
+		const wrapper = render()
+		await reorderButtons(wrapper, 1)[1].trigger('click')
+		expect(store.move).toHaveBeenCalledWith(2, 'earlier')
+	})
+
+	it('flips the chevron mapping when the date sort is ascending', async () => {
+		const wrapper = render()
+		// Toggle the Date column to ascending: now the earliest leg is on top.
+		await wrapper.findAll('th .sort-button')[0].trigger('click')
+		// Middle row is still id 2; up now means earlier in the day.
+		await reorderButtons(wrapper, 1)[0].trigger('click')
+		expect(store.move).toHaveBeenCalledWith(2, 'earlier')
+	})
+
+	it('hides chevrons while a filter is active', () => {
+		routeHolder.query = { airport: 'AAA', airportDir: 'from' }
+		const wrapper = render()
+		expect(wrapper.findAll('td.reorder .nc-button')).toHaveLength(0)
 	})
 })

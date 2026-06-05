@@ -1,6 +1,7 @@
 export interface Flight {
 	id: number
 	flightDate: string
+	daySeq: number
 	originCode: string | null
 	destinationCode: string | null
 	originLabel: string | null
@@ -18,7 +19,7 @@ export interface Flight {
 	updatedAt: number
 }
 
-export type FlightInput = Omit<Flight, 'id' | 'distanceKm' | 'createdAt' | 'updatedAt'>
+export type FlightInput = Omit<Flight, 'id' | 'daySeq' | 'distanceKm' | 'createdAt' | 'updatedAt'>
 
 export interface Airport {
 	id: number

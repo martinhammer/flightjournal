@@ -35,5 +35,12 @@ export const useFlightsStore = defineStore('flights', () => {
 		flights.value = flights.value.filter((f) => f.id !== id)
 	}
 
-	return { flights, loading, loaded, fetchAll, create, update, remove }
+	// A move swaps day_seq between two flights server-side; the endpoint returns
+	// only the moved one, so re-fetch to pick up the neighbour's new order too.
+	async function move(id: number, direction: api.MoveDirection) {
+		await api.moveFlight(id, direction)
+		flights.value = await api.listFlights()
+	}
+
+	return { flights, loading, loaded, fetchAll, create, update, remove, move }
 })
