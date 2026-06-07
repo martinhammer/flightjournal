@@ -251,26 +251,28 @@ async function remove(f: Flight) {
 						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
 						<td>{{ f.seat ?? '' }}</td>
 						<td class="reorder">
-							<template v-if="hasDaySiblings(i)">
+							<div v-if="hasDaySiblings(i)" class="reorder-controls">
 								<NcButton
 									variant="tertiary-no-background"
 									:disabled="!canMoveUp(i)"
+									:title="canMoveUp(i) ? 'Reorder same-day flights' : undefined"
 									aria-label="Move up within the day"
 									@click="move(f, true)">
 									<template #icon>
-										<ChevronUp :size="20" />
+										<ChevronUp :size="16" />
 									</template>
 								</NcButton>
 								<NcButton
 									variant="tertiary-no-background"
 									:disabled="!canMoveDown(i)"
+									:title="canMoveDown(i) ? 'Reorder same-day flights' : undefined"
 									aria-label="Move down within the day"
 									@click="move(f, false)">
 									<template #icon>
-										<ChevronDown :size="20" />
+										<ChevronDown :size="16" />
 									</template>
 								</NcButton>
-							</template>
+							</div>
 						</td>
 						<td class="actions">
 							<NcActions :force-menu="true">
@@ -400,14 +402,16 @@ async function remove(f: Flight) {
 }
 
 .flight-table td.reorder {
-	white-space: nowrap;
+	/* Shrink the chevron buttons so the stacked pair doesn't inflate row height
+	   beyond the other rows (whose height is set by the kebab menu's tap target). */
+	--default-clickable-area: 20px;
 	width: 1px;
+	padding-block: 0;
 	padding-inline: 0;
 }
 
-.flight-table td.reorder :deep(.button-vue) {
-	/* Tighten the two chevrons so they read as a single control. */
-	min-height: 32px;
-	min-width: 32px;
+.reorder-controls {
+	display: inline-flex;
+	flex-direction: column;
 }
 </style>
