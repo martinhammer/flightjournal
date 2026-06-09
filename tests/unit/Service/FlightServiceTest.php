@@ -422,6 +422,73 @@ class FlightServiceTest extends TestCase {
 		$this->assertNull($captured->getDistanceKm());
 	}
 
+	public function testRestorePreservesDaySeqDistanceAndTimestamps(): void {
+		$captured = null;
+		$this->mapper->expects($this->never())->method('maxDaySeqForDate');
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+
+		$this->service->restore('alice', $this->validData([
+			'originCode' => 'CPH',
+			'destinationCode' => 'LHR',
+			'daySeq' => 3,
+			'distanceKm' => 955,
+			'createdAt' => 1600000000,
+			'updatedAt' => 1600000500,
+		]));
+
+		$this->assertSame(3, $captured->getDaySeq(), 'explicit day_seq honoured');
+		$this->assertSame(955, $captured->getDistanceKm(), 'recorded distance honoured');
+		$this->assertSame(1600000000, $captured->getCreatedAt(), 'createdAt honoured');
+		$this->assertSame(1600000500, $captured->getUpdatedAt(), 'updatedAt honoured');
+	}
+
+	public function testRestoreDerivesDaySeqAndTimestampsWhenAbsent(): void {
+		$captured = null;
+		$this->mapper->method('maxDaySeqForDate')->with('alice', '2026-05-01')->willReturn(1);
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+
+		// Bare row: no day_seq/distance/timestamps.
+		$this->service->restore('alice', $this->validData([
+			'originCode' => 'CPH',
+			'destinationCode' => 'LHR',
+		]));
+
+		$this->assertSame(2, $captured->getDaySeq(), 'appended to end of day when absent');
+		$this->assertSame(1700000000, $captured->getCreatedAt(), 'timestamps fall back to now');
+		$this->assertSame(1700000000, $captured->getUpdatedAt());
+	}
+
+	public function testRestoreReconcilesAndKeepsComputedDistanceWhenBackupHasNone(): void {
+		$captured = null;
+		$this->mapper->method('insert')->willReturnCallback(function (Flight $f) use (&$captured) {
+			$captured = $f;
+			return $f;
+		});
+		// A backup row whose endpoints were never matched (no codes, no distance):
+		// reconciliation runs and may now resolve + compute distance.
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Copenhagen', new AirportMatch('CPH', 'Copenhagen Kastrup', 55.618, 12.656)],
+			['London', new AirportMatch('LHR', 'London Heathrow', 51.47, -0.4543)],
+		]);
+
+		$this->service->restore('alice', $this->validData());
+
+		$this->assertSame('CPH', $captured->getOriginCode());
+		$this->assertEqualsWithDelta(955, $captured->getDistanceKm(), 30, 'distance reconciled when backup omits it');
+	}
+
+	public function testRestoreValidatesLikeCreate(): void {
+		$this->mapper->expects($this->never())->method('insert');
+		$this->expectException(ValidationException::class);
+		$this->service->restore('alice', ['flightDate' => 'bad']);
+	}
+
 	public function testReconcileAllRecomputesDistanceWhenBothSidesResolve(): void {
 		$flight = new Flight();
 		$flight->setOriginLabel('Copenhagen');

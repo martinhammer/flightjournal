@@ -48,6 +48,45 @@ class FlightService {
 		return $this->mapper->insert($flight);
 	}
 
+	/**
+	 * Create a flight from a backup row, preserving its explicit within-day
+	 * order, distance and timestamps when present, and otherwise falling back to
+	 * the same derivation as create(). Airport reconciliation still runs for any
+	 * endpoint without an explicit code (so a hand-written or partial backup is
+	 * reconciled), but a non-null backup distance is honoured verbatim — a backup
+	 * restores faithfully even on an instance with no airport reference data.
+	 *
+	 * @psalm-suppress PossiblyUnusedReturnValue
+	 */
+	public function restore(string $userId, array $data): Flight {
+		$this->validate($data);
+		$flight = new Flight();
+		$flight->setUserId($userId);
+		$this->applyData($flight, $data);
+
+		$daySeq = $this->int($data, 'daySeq');
+		$flight->setDaySeq(
+			$daySeq !== null && $daySeq > 0
+				? $daySeq
+				: $this->mapper->maxDaySeqForDate($userId, $flight->getFlightDate()) + 1,
+		);
+
+		// A recorded distance wins; a null/absent one leaves applyData's
+		// reconciled (or null) value in place.
+		$distance = $this->int($data, 'distanceKm');
+		if ($distance !== null) {
+			$flight->setDistanceKm($distance);
+		}
+
+		$now = $this->time->getTime();
+		$createdAt = $this->int($data, 'createdAt');
+		$updatedAt = $this->int($data, 'updatedAt');
+		$flight->setCreatedAt($createdAt !== null && $createdAt > 0 ? $createdAt : $now);
+		$flight->setUpdatedAt($updatedAt !== null && $updatedAt > 0 ? $updatedAt : $now);
+
+		return $this->mapper->insert($flight);
+	}
+
 	public function update(int $id, string $userId, array $data): Flight {
 		$flight = $this->find($id, $userId);
 		$this->validate($data);
@@ -285,6 +324,12 @@ class FlightService {
 		}
 		$trimmed = trim($value);
 		return $trimmed === '' ? null : $trimmed;
+	}
+
+	private function int(array $data, string $key): ?int {
+		/** @var mixed $value */
+		$value = $data[$key] ?? null;
+		return is_int($value) ? $value : null;
 	}
 
 	private function upper(?string $value): ?string {

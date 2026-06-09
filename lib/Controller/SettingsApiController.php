@@ -35,37 +35,46 @@ class SettingsApiController extends OCSController {
 	/**
 	 * Import flights from a textual payload
 	 *
-	 * @param string $dataformat Import format identifier (currently only 'markdown')
+	 * @param string $dataformat Import format identifier ('markdown' or 'json')
 	 * @param string $content The raw content to parse
-	 * @return DataResponse<Http::STATUS_OK, array{imported: int, skipped: list<array{line: int, reason: string, raw: string}>}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
+	 * @param bool $replace When true (JSON only), delete the user's existing flights before importing
+	 * @return DataResponse<Http::STATUS_OK, array{imported: int, skipped: list<array{line: int, reason: string, raw: string}>, deleted?: int}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
 	 *
 	 * 200: Import processed (may include skipped rows)
-	 * 400: Unsupported dataformat or empty content
+	 * 400: Unsupported dataformat, empty content, or malformed payload
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'POST', url: '/api/v1/import')]
-	public function import(string $dataformat, string $content): DataResponse {
-		if ($dataformat !== 'markdown') {
+	public function import(string $dataformat, string $content, bool $replace = false): DataResponse {
+		if ($dataformat !== 'markdown' && $dataformat !== 'json') {
 			return new DataResponse(['message' => "Unsupported dataformat '$dataformat'"], Http::STATUS_BAD_REQUEST);
 		}
 		if (trim($content) === '') {
 			return new DataResponse(['message' => 'Content is empty'], Http::STATUS_BAD_REQUEST);
 		}
-		$result = $this->importService->importMarkdownTable($this->getUserId(), $content);
+		try {
+			$result = $dataformat === 'json'
+				? $this->importService->importJson($this->getUserId(), $content, $replace)
+				: $this->importService->importMarkdownTable($this->getUserId(), $content);
+		} catch (\InvalidArgumentException $e) {
+			return new DataResponse(['message' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+		}
 		return new DataResponse($result);
 	}
 
 	/**
 	 * Export the user's flights as a downloadable file
 	 *
-	 * @param string $dataformat Export format identifier (currently only 'markdown')
+	 * @param string $dataformat Export format identifier ('markdown' or 'json')
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'GET', url: '/api/v1/export')]
 	#[OpenAPI(OpenAPI::SCOPE_IGNORE)]
 	public function export(string $dataformat = 'markdown'): DataDownloadResponse {
-		// Dataformat is reserved for future expansion; only markdown is supported today.
-		unset($dataformat);
+		if ($dataformat === 'json') {
+			$content = $this->exportService->exportJson($this->getUserId());
+			return new DataDownloadResponse($content, 'flightjournal-export.json', 'application/json');
+		}
 		$content = $this->exportService->exportMarkdownTable($this->getUserId());
 		return new DataDownloadResponse($content, 'flightjournal-export.md', 'text/markdown');
 	}

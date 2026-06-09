@@ -1724,11 +1724,16 @@
                                 "properties": {
                                     "dataformat": {
                                         "type": "string",
-                                        "description": "Import format identifier (currently only 'markdown')"
+                                        "description": "Import format identifier ('markdown' or 'json')"
                                     },
                                     "content": {
                                         "type": "string",
                                         "description": "The raw content to parse"
+                                    },
+                                    "replace": {
+                                        "type": "boolean",
+                                        "default": false,
+                                        "description": "When true (JSON only), delete the user's existing flights before importing"
                                     }
                                 }
                             }
@@ -1801,6 +1806,10 @@
                                                                     }
                                                                 }
                                                             }
+                                                        },
+                                                        "deleted": {
+                                                            "type": "integer",
+                                                            "format": "int64"
                                                         }
                                                     }
                                                 }
@@ -1812,7 +1821,7 @@
                         }
                     },
                     "400": {
-                        "description": "Unsupported dataformat or empty content",
+                        "description": "Unsupported dataformat, empty content, or malformed payload",
                         "content": {
                             "application/json": {
                                 "schema": {

@@ -161,6 +161,137 @@ class ImportServiceTest extends TestCase {
 		$this->assertSame(2, $result['skipped'][0]['line']);
 	}
 
+	public function testImportsJsonEnvelope(): void {
+		$json = json_encode([
+			'app' => 'flightjournal',
+			'version' => 1,
+			'flights' => [
+				[
+					'flightDate' => '2026-05-01',
+					'daySeq' => 2,
+					'originCode' => 'CPH',
+					'destinationCode' => 'LHR',
+					'originLabel' => 'Copenhagen Kastrup',
+					'destinationLabel' => 'London Heathrow',
+					'airlineCode' => 'SK',
+					'flightNumber' => '4745',
+					'aircraftTypeRaw' => 'B738',
+					'registration' => 'OY-KAL',
+					'cabinClass' => 'economy',
+					'seat' => '12A',
+					'notes' => 'window',
+					'distanceKm' => 955,
+					'createdAt' => 1700000000,
+					'updatedAt' => 1700000500,
+				],
+			],
+		]);
+
+		$captured = null;
+		$this->flights->expects($this->once())
+			->method('restore')
+			->willReturnCallback(function (string $userId, array $data) use (&$captured) {
+				$captured = [$userId, $data];
+				return new Flight();
+			});
+
+		$result = $this->importer->importJson('alice', (string)$json);
+
+		$this->assertSame(1, $result['imported']);
+		$this->assertSame([], $result['skipped']);
+		$this->assertSame('alice', $captured[0]);
+		$this->assertSame('2026-05-01', $captured[1]['flightDate']);
+		$this->assertSame('CPH', $captured[1]['originCode']);
+		$this->assertSame('London Heathrow', $captured[1]['destinationLabel']);
+		$this->assertSame('economy', $captured[1]['cabinClass']);
+		$this->assertSame('window', $captured[1]['notes']);
+		// Numeric backup fields are passed through as ints.
+		$this->assertSame(2, $captured[1]['daySeq']);
+		$this->assertSame(955, $captured[1]['distanceKm']);
+		$this->assertSame(1700000000, $captured[1]['createdAt']);
+		$this->assertSame(1700000500, $captured[1]['updatedAt']);
+	}
+
+	public function testImportsBareJsonArray(): void {
+		$json = json_encode([
+			['flightDate' => '2026-05-01', 'originLabel' => 'CPH', 'destinationLabel' => 'LHR'],
+			['flightDate' => '2026-05-02', 'originLabel' => 'LHR', 'destinationLabel' => 'CPH'],
+		]);
+		$this->flights->expects($this->exactly(2))->method('restore')->willReturn(new Flight());
+		$result = $this->importer->importJson('alice', (string)$json);
+		$this->assertSame(2, $result['imported']);
+		$this->assertSame([], $result['skipped']);
+		$this->assertSame(0, $result['deleted'], 'append by default deletes nothing');
+	}
+
+	public function testJsonImportWithReplaceWipesBeforeImporting(): void {
+		$json = json_encode(['flights' => [
+			['flightDate' => '2026-05-01', 'originLabel' => 'CPH', 'destinationLabel' => 'LHR'],
+		]]);
+		$this->flights->expects($this->once())->method('deleteAll')->with('alice')->willReturn(7);
+		$this->flights->expects($this->once())->method('restore')->willReturn(new Flight());
+
+		$result = $this->importer->importJson('alice', (string)$json, true);
+
+		$this->assertSame(1, $result['imported']);
+		$this->assertSame(7, $result['deleted']);
+	}
+
+	public function testJsonImportWithReplaceDoesNotWipeOnMalformedJson(): void {
+		// A malformed payload must never delete existing data it then fails to replace.
+		$this->flights->expects($this->never())->method('deleteAll');
+		$this->flights->expects($this->never())->method('restore');
+		$this->expectException(\InvalidArgumentException::class);
+		$this->importer->importJson('alice', 'not json {', true);
+	}
+
+	public function testJsonImportOmitsNonNumericNumericFields(): void {
+		// A bare/partial row without day_seq/distance leaves those keys unset so
+		// restore() derives them rather than receiving a coerced 0.
+		$json = json_encode(['flights' => [
+			['flightDate' => '2026-05-01', 'originLabel' => 'CPH', 'destinationLabel' => 'LHR'],
+		]]);
+		$captured = null;
+		$this->flights->method('restore')->willReturnCallback(function ($_u, array $data) use (&$captured) {
+			$captured = $data;
+			return new Flight();
+		});
+		$this->importer->importJson('alice', (string)$json);
+		$this->assertArrayNotHasKey('daySeq', $captured);
+		$this->assertArrayNotHasKey('distanceKm', $captured);
+		$this->assertArrayNotHasKey('createdAt', $captured);
+	}
+
+	public function testJsonImportRejectsInvalidJson(): void {
+		$this->flights->expects($this->never())->method('restore');
+		$this->expectException(\InvalidArgumentException::class);
+		$this->importer->importJson('alice', 'not json {');
+	}
+
+	public function testJsonImportRejectsNonListFlights(): void {
+		$json = json_encode(['flights' => ['CPH' => ['flightDate' => '2026-05-01']]]);
+		$this->expectException(\InvalidArgumentException::class);
+		$this->importer->importJson('alice', (string)$json);
+	}
+
+	public function testJsonImportRecordsPerRowValidationFailure(): void {
+		$json = json_encode(['flights' => [
+			['flightDate' => '2026-05-01', 'originLabel' => 'CPH', 'destinationLabel' => 'LHR'],
+			['flightDate' => 'bad', 'originLabel' => 'X', 'destinationLabel' => 'Y'],
+		]]);
+		$this->flights->method('restore')->willReturnCallback(function ($_u, array $data) {
+			if ($data['flightDate'] === 'bad') {
+				throw new ValidationException('flightDate must be YYYY-MM-DD');
+			}
+			return new Flight();
+		});
+		$result = $this->importer->importJson('alice', (string)$json);
+		$this->assertSame(1, $result['imported']);
+		$this->assertCount(1, $result['skipped']);
+		$this->assertSame(2, $result['skipped'][0]['line']);
+		$this->assertStringContainsString('YYYY-MM-DD', $result['skipped'][0]['reason']);
+	}
+
 	public function testFlightFallbackKeepsTokenWhenPatternFails(): void {
 		// "ABCD" doesn't match the airline+digits pattern; falls through to "no airline split"
 		$markdown = '| 2026/05/01 | ABCD | CPH-LHR | B738 | OY-KAL |';

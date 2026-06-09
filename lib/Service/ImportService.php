@@ -53,6 +53,90 @@ class ImportService {
 	}
 
 	/**
+	 * Import flights from a JSON backup produced by ExportService::exportJson.
+	 *
+	 * Accepts either the full envelope ({ "version": …, "flights": [ … ] }) or a
+	 * bare list of flight objects. Each object carries the same field names the
+	 * SPA and export use (flightDate, originLabel, airlineCode, …). Rows go
+	 * through FlightService::restore, which honours an explicit day_seq, distance
+	 * and timestamps when present (so a full backup round-trips losslessly) and
+	 * otherwise derives them. A stored origin/destination code is passed through
+	 * verbatim; rows without a code are reconciled.
+	 *
+	 * When $replace is true the user's existing flights are deleted first — but
+	 * only after the payload has been parsed and structurally validated, so a
+	 * malformed file can never wipe data it then fails to replace.
+	 *
+	 * @return array{
+	 *     imported: int,
+	 *     skipped: list<array{line: int, reason: string, raw: string}>,
+	 *     deleted: int,
+	 * }
+	 */
+	public function importJson(string $userId, string $json, bool $replace = false): array {
+		$decoded = json_decode($json, true);
+		if (!is_array($decoded)) {
+			throw new \InvalidArgumentException('Content is not valid JSON');
+		}
+
+		// Envelope ({ flights: [...] }) or a bare list of flights.
+		$rows = $decoded['flights'] ?? $decoded;
+		if (!is_array($rows) || !array_is_list($rows)) {
+			throw new \InvalidArgumentException('Expected a "flights" array of flight objects');
+		}
+
+		// Safe to wipe now: the payload parsed and is structurally valid.
+		$deleted = $replace ? $this->flights->deleteAll($userId) : 0;
+
+		$imported = 0;
+		$skipped = [];
+
+		foreach ($rows as $idx => $row) {
+			$raw = (string)json_encode($row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			if (!is_array($row)) {
+				$skipped[] = ['line' => $idx + 1, 'reason' => 'Entry is not an object', 'raw' => $raw];
+				continue;
+			}
+			try {
+				$this->flights->restore($userId, $this->jsonRowToFlightInput($row));
+				$imported++;
+			} catch (ValidationException|\InvalidArgumentException $e) {
+				$skipped[] = ['line' => $idx + 1, 'reason' => $e->getMessage(), 'raw' => $raw];
+			}
+		}
+
+		return ['imported' => $imported, 'skipped' => $skipped, 'deleted' => $deleted];
+	}
+
+	/**
+	 * @param array<array-key, mixed> $row
+	 * @return array<string, string|int|null>
+	 */
+	private function jsonRowToFlightInput(array $row): array {
+		$stringFields = [
+			'flightDate', 'originCode', 'destinationCode', 'originLabel', 'destinationLabel',
+			'airlineCode', 'flightNumber', 'aircraftTypeCode', 'aircraftTypeRaw',
+			'registration', 'cabinClass', 'seat', 'notes',
+		];
+		$input = [];
+		foreach ($stringFields as $field) {
+			/** @var mixed $value */
+			$value = $row[$field] ?? null;
+			$input[$field] = is_scalar($value) ? trim((string)$value) : null;
+		}
+		// Numeric backup-only fields preserved for an exact restore; left unset
+		// (so restore() derives them) when absent or non-numeric.
+		foreach (['daySeq', 'distanceKm', 'createdAt', 'updatedAt'] as $field) {
+			/** @var mixed $value */
+			$value = $row[$field] ?? null;
+			if (is_numeric($value)) {
+				$input[$field] = (int)$value;
+			}
+		}
+		return $input;
+	}
+
+	/**
 	 * @return list<array{line: int, raw: string, cells: list<string>}>
 	 */
 	private function parseMarkdownTable(string $markdown): array {
