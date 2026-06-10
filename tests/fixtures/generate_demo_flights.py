@@ -15,108 +15,108 @@ Characteristics (see the project brief):
 Deterministic: a fixed RNG seed makes the output reproducible.
 """
 
+import argparse
 import json
 import math
+import os
 import random
+import sys
 from datetime import datetime, timezone, date, timedelta
 
 random.seed(20260609)
 
 TODAY = date(2026, 6, 9)
 
-# --- Reference airports: code -> (name, lat, lon) --------------------------------
-AIRPORTS = {
+# --- Reference airports ---------------------------------------------------------
+# The curated set of airports the demo routes use. Names, coordinates and the
+# canonical code are loaded from the reference dataset (see load_reference) so
+# the fixture's labels, codes and distances are exactly what airport
+# reconciliation produces against that same data. We must never ship a fixture
+# whose label/code pairs disagree with the reference (it would self-corrupt on a
+# recheck and look broken on the map). Every code here has an IATA entry, so the
+# canonical code equals the code itself.
+CURATED_CODES = [
     # Germany / home region
-    "FRA": ("Frankfurt am Main", 50.0379, 8.5622),
-    "MUC": ("Munich", 48.3538, 11.7861),
-    "BER": ("Berlin Brandenburg", 52.3667, 13.5033),
-    "HAM": ("Hamburg", 53.6304, 9.9882),
-    "DUS": ("Düsseldorf", 51.2895, 6.7668),
-    "STR": ("Stuttgart", 48.6899, 9.2219),
-    "CGN": ("Cologne Bonn", 50.8659, 7.1427),
+    "FRA", "MUC", "BER", "HAM", "DUS", "STR", "CGN",
     # Europe short-haul
-    "LHR": ("London Heathrow", 51.4700, -0.4543),
-    "LGW": ("London Gatwick", 51.1537, -0.1821),
-    "MAN": ("Manchester", 53.3537, -2.2750),
-    "EDI": ("Edinburgh", 55.9500, -3.3725),
-    "CDG": ("Paris Charles de Gaulle", 49.0097, 2.5479),
-    "ORY": ("Paris Orly", 48.7233, 2.3794),
-    "NCE": ("Nice Côte d'Azur", 43.6584, 7.2159),
-    "LYS": ("Lyon Saint-Exupéry", 45.7256, 5.0811),
-    "AMS": ("Amsterdam Schiphol", 52.3105, 4.7683),
-    "BRU": ("Brussels", 50.9014, 4.4844),
-    "ZRH": ("Zürich", 47.4647, 8.5492),
-    "GVA": ("Geneva", 46.2381, 6.1090),
-    "VIE": ("Vienna", 48.1103, 16.5697),
-    "MAD": ("Madrid Barajas", 40.4983, -3.5676),
-    "BCN": ("Barcelona El Prat", 41.2974, 2.0833),
-    "FCO": ("Rome Fiumicino", 41.8003, 12.2389),
-    "MXP": ("Milan Malpensa", 45.6306, 8.7281),
-    "LIN": ("Milan Linate", 45.4451, 9.2767),
-    "VCE": ("Venice Marco Polo", 45.5053, 12.3519),
-    "NAP": ("Naples", 40.8860, 14.2908),
-    "ATH": ("Athens", 37.9364, 23.9445),
-    "LIS": ("Lisbon", 38.7742, -9.1342),
-    "OPO": ("Porto", 41.2481, -8.6814),
-    "DUB": ("Dublin", 53.4213, -6.2701),
-    "CPH": ("Copenhagen", 55.6181, 12.6561),
-    "ARN": ("Stockholm Arlanda", 59.6519, 17.9186),
-    "OSL": ("Oslo Gardermoen", 60.1939, 11.1004),
-    "HEL": ("Helsinki Vantaa", 60.3172, 24.9633),
-    "WAW": ("Warsaw Chopin", 52.1657, 20.9671),
-    "PRG": ("Prague", 50.1008, 14.2600),
-    "BUD": ("Budapest", 47.4369, 19.2556),
-    "PMI": ("Palma de Mallorca", 39.5517, 2.7388),
-    "TFS": ("Tenerife South", 28.0445, -16.5725),
-    "MLA": ("Malta", 35.8575, 14.4775),
-    "KRK": ("Kraków", 50.0777, 19.7848),
-    "KEF": ("Reykjavík Keflavík", 63.9850, -22.6056),
-    "TLV": ("Tel Aviv Ben Gurion", 32.0114, 34.8867),
-    "IST": ("Istanbul", 41.2753, 28.7519),
+    "LHR", "LGW", "MAN", "EDI", "CDG", "ORY", "NCE", "LYS", "AMS", "BRU", "ZRH", "GVA",
+    "VIE", "MAD", "BCN", "FCO", "MXP", "LIN", "VCE", "NAP", "ATH", "LIS", "OPO", "DUB",
+    "CPH", "ARN", "OSL", "HEL", "WAW", "PRG", "BUD", "PMI", "TFS", "MLA", "KRK", "KEF",
+    "TLV", "IST",
     # Long-haul
-    "JFK": ("New York JFK", 40.6413, -73.7781),
-    "EWR": ("Newark Liberty", 40.6895, -74.1745),
-    "ORD": ("Chicago O'Hare", 41.9742, -87.9073),
-    "BOS": ("Boston Logan", 42.3656, -71.0096),
-    "IAD": ("Washington Dulles", 38.9531, -77.4565),
-    "SFO": ("San Francisco", 37.6213, -122.3790),
-    "LAX": ("Los Angeles", 33.9416, -118.4085),
-    "SEA": ("Seattle Tacoma", 47.4502, -122.3088),
-    "MIA": ("Miami", 25.7959, -80.2870),
-    "YYZ": ("Toronto Pearson", 43.6777, -79.6248),
-    "YVR": ("Vancouver", 49.1967, -123.1815),
-    "MEX": ("Mexico City", 19.4361, -99.0719),
-    "GRU": ("São Paulo Guarulhos", -23.4356, -46.4731),
-    "EZE": ("Buenos Aires Ezeiza", -34.8222, -58.5358),
-    "DXB": ("Dubai", 25.2532, 55.3657),
-    "DOH": ("Doha Hamad", 25.2731, 51.6080),
-    "AUH": ("Abu Dhabi", 24.4330, 54.6511),
-    "SIN": ("Singapore Changi", 1.3644, 103.9915),
-    "HKG": ("Hong Kong", 22.3080, 113.9185),
-    "NRT": ("Tokyo Narita", 35.7720, 140.3929),
-    "HND": ("Tokyo Haneda", 35.5494, 139.7798),
-    "ICN": ("Seoul Incheon", 37.4602, 126.4407),
-    "PEK": ("Beijing Capital", 40.0799, 116.6031),
-    "PVG": ("Shanghai Pudong", 31.1443, 121.8083),
-    "BKK": ("Bangkok Suvarnabhumi", 13.6900, 100.7501),
-    "DEL": ("Delhi Indira Gandhi", 28.5562, 77.1000),
-    "BOM": ("Mumbai", 19.0896, 72.8656),
-    "JNB": ("Johannesburg O.R. Tambo", -26.1392, 28.2460),
-    "CPT": ("Cape Town", -33.9715, 18.6021),
-    "SYD": ("Sydney Kingsford Smith", -33.9399, 151.1753),
-    "MEL": ("Melbourne", -37.6690, 144.8410),
-    "AKL": ("Auckland", -37.0082, 174.7850),
-    "NBO": ("Nairobi Jomo Kenyatta", -1.3192, 36.9278),
-    "CAI": ("Cairo", 30.1219, 31.4056),
-    "RUH": ("Riyadh King Khalid", 24.9576, 46.6988),
-    "MLE": ("Malé Velana", 4.1918, 73.5291),
-}
+    "JFK", "EWR", "ORD", "BOS", "IAD", "SFO", "LAX", "SEA", "MIA", "YYZ", "YVR", "MEX",
+    "GRU", "EZE", "DXB", "DOH", "AUH", "SIN", "HKG", "NRT", "HND", "ICN", "PEK", "PVG",
+    "BKK", "DEL", "BOM", "JNB", "CPT", "SYD", "MEL", "AKL", "NBO", "CAI", "RUH", "MLE",
+]
+
+
+def load_reference(path, codes):
+    """Build {code: (name, lat, lon)} for `codes` from the reference airports JSON.
+
+    The reference file is the mwgg/Airports dataset (the same JSON an admin
+    imports into Flight Journal): an object keyed by ICAO, each value carrying
+    icao/iata/name/lat/lon. We index by IATA and look each curated code up there;
+    the canonical code Flight Journal stores is IATA-when-present, and every
+    curated code has one. Any code missing from the reference is a hard error —
+    we will not silently emit an airport the product cannot reconcile.
+    """
+    with open(path, encoding="utf-8") as f:
+        ref = json.load(f)
+    by_iata = {}
+    for entry in ref.values():
+        iata = entry.get("iata")
+        if iata:
+            by_iata[iata] = entry
+    out = {}
+    missing = []
+    for code in codes:
+        entry = by_iata.get(code)
+        if entry is None or not entry.get("name"):
+            missing.append(code)
+            continue
+        out[code] = (entry["name"], float(entry["lat"]), float(entry["lon"]))
+    if missing:
+        raise SystemExit(
+            "Reference data is missing usable entries for: " + ", ".join(missing)
+            + ". Use an airports.json that contains these IATA codes."
+        )
+    return out
+
+
+def _default_reference_path():
+    """Look for an airports.json next to this script or in the CWD."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "airports.json"), "airports.json"):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--airports", default=_default_reference_path(),
+    help="Path to the reference airports JSON (mwgg/Airports format, keyed by "
+         "ICAO). Defaults to airports.json next to this script or in the CWD.",
+)
+parser.add_argument(
+    "--out", default="tests/fixtures/demo-flights.json",
+    help="Output path for the generated demo dataset.",
+)
+args = parser.parse_args()
+
+if not args.airports or not os.path.exists(args.airports):
+    sys.exit(
+        "Reference airports JSON not found. Pass --airports /path/to/airports.json "
+        "(the same mwgg/Airports dataset an admin imports into Flight Journal)."
+    )
+
+AIRPORTS = load_reference(args.airports, CURATED_CODES)
 
 
 def haversine_km(a, b):
     (_, la1, lo1) = AIRPORTS[a]
     (_, la2, lo2) = AIRPORTS[b]
-    r = 6371.0
+    r = 6371.0088  # IUGG mean Earth radius — matches Service/GreatCircle.php
     p1, p2 = math.radians(la1), math.radians(la2)
     dphi = math.radians(la2 - la1)
     dl = math.radians(lo2 - lo1)
@@ -494,6 +494,19 @@ INVALID = [
      "olabel": "Barville Strip", "dlabel": "Frankfurt am Main", "al": "EW"},
 ]
 
+def invalid_endpoint(code, label):
+    """(code, label) for one endpoint of a deliberately-unmatched demo flight.
+
+    A recognised code stores its canonical code + the reference name (so the
+    valid half of the leg plots normally); an unrecognised one stores *no* code
+    and the user's free text, which is how real un-reconciled data looks — it
+    surfaces under the "Unmatched airports" filter and stays unplottable.
+    """
+    if code in AIRPORTS:
+        return code, AIRPORTS[code][0]
+    return None, label
+
+
 # Nudge each invalid flight onto a free date so it stays a solitary single-leg
 # day rather than merging into a real connection.
 used_dates = {l["date"] for l in raw_legs}
@@ -521,18 +534,19 @@ flights = []
 for d in sorted(by_date):
     legs = sorted(by_date[d], key=lambda x: x["seq"])
     for i, l in enumerate(legs, start=1):
-        if "olabel" in l:  # invalid leg
-            dist = None
+        if "olabel" in l:  # deliberately unmatched leg
+            o_code, o_label = invalid_endpoint(l["orig"], l["olabel"])
+            d_code, d_label = invalid_endpoint(l["dest"], l["dlabel"])
             ref = 1200
             ac_code, ac_raw = pick_aircraft(ref, l["airline"] if l["airline"] in REG_POOL else "LH")
             cabin = pick_cabin(ref)
             flights.append({
                 "flightDate": d.isoformat(),
                 "daySeq": i,
-                "originCode": l["orig"],
-                "destinationCode": l["dest"],
-                "originLabel": l["olabel"],
-                "destinationLabel": l["dlabel"],
+                "originCode": o_code,
+                "destinationCode": d_code,
+                "originLabel": o_label,
+                "destinationLabel": d_label,
                 "airlineCode": l["airline"],
                 "flightNumber": flight_number(l["airline"], ref),
                 "aircraftTypeCode": ac_code,
@@ -541,7 +555,7 @@ for d in sorted(by_date):
                 "cabinClass": cabin,
                 "seat": pick_seat(cabin, ac_code in WIDEBODY),
                 "notes": "Imported with an unrecognised airport code",
-                "distanceKm": dist,
+                "distanceKm": None,
                 "createdAt": epoch_noon(d),
                 "updatedAt": epoch_noon(d),
             })
@@ -555,7 +569,7 @@ envelope = {
     "flights": flights,
 }
 
-OUT = "tests/fixtures/demo-flights.json"
+OUT = args.out
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(envelope, f, ensure_ascii=False, indent=2)
     f.write("\n")
