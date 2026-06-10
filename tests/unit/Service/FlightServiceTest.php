@@ -188,6 +188,82 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame(1700000000, $result->getUpdatedAt(), 'updatedAt refreshed');
 	}
 
+	public function testUpdatePreservesUnchangedEndpointWithUnresolvableLabel(): void {
+		// Regression for the demo-data bug: a flight imported with a code and a
+		// human label ("Dublin") that does not itself resolve. Editing an
+		// unrelated field (the seat) must not re-reconcile the unchanged label and
+		// clear the code/distance.
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-02-16');
+		$existing->setOriginLabel('Dublin');
+		$existing->setOriginCode('DUB');
+		$existing->setDestinationLabel('Frankfurt am Main');
+		$existing->setDestinationCode('FRA');
+		$existing->setDistanceKm(1086);
+		$existing->setSeat('15A');
+
+		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+
+		// The human labels don't resolve (as in the real reference data, where
+		// "Dublin" is ambiguous by city); only the canonical codes do.
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Dublin', null],
+			['Frankfurt am Main', null],
+			['DUB', new AirportMatch('DUB', 'Dublin', 53.42, -6.27)],
+			['FRA', new AirportMatch('FRA', 'Frankfurt am Main', 50.03, 8.57)],
+		]);
+
+		$result = $this->service->update(7, 'alice', [
+			'flightDate' => '2026-02-16',
+			'originLabel' => 'Dublin',
+			'destinationLabel' => 'Frankfurt am Main',
+			'seat' => '15C', // the only change
+		]);
+
+		$this->assertSame('DUB', $result->getOriginCode(), 'unchanged origin keeps its code');
+		$this->assertSame('FRA', $result->getDestinationCode(), 'unchanged destination keeps its code');
+		$this->assertSame('Dublin', $result->getOriginLabel(), 'origin label untouched');
+		$this->assertSame('Frankfurt am Main', $result->getDestinationLabel(), 'destination label untouched');
+		$this->assertSame(1086, $result->getDistanceKm(), 'distance retained when both endpoints unchanged');
+		$this->assertSame('15C', $result->getSeat(), 'the edited field is applied');
+	}
+
+	public function testUpdateReReconcilesAnEditedEndpointLabel(): void {
+		// The flip side: when the user *does* change an endpoint label, it is
+		// reconciled afresh (and the other, unchanged side is still preserved).
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-02-16');
+		$existing->setOriginLabel('Dublin');
+		$existing->setOriginCode('DUB');
+		$existing->setDestinationLabel('Frankfurt am Main');
+		$existing->setDestinationCode('FRA');
+		$existing->setDistanceKm(1086);
+
+		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+
+		$this->reconciler->method('resolve')->willReturnMap([
+			['LHR', new AirportMatch('LHR', 'London Heathrow', 51.47, -0.4543)],
+			['FRA', new AirportMatch('FRA', 'Frankfurt am Main', 50.03, 8.57)],
+		]);
+
+		// Origin changed Dublin → LHR; destination label left unchanged.
+		$result = $this->service->update(7, 'alice', [
+			'flightDate' => '2026-02-16',
+			'originLabel' => 'LHR',
+			'destinationLabel' => 'Frankfurt am Main',
+		]);
+
+		$this->assertSame('LHR', $result->getOriginCode(), 'edited origin re-reconciled');
+		$this->assertSame('London Heathrow', $result->getOriginLabel(), 'label replaced with the reference name');
+		$this->assertSame('FRA', $result->getDestinationCode(), 'unchanged destination still kept');
+		$this->assertNotNull($result->getDistanceKm(), 'distance recomputed for the new route');
+		$this->assertNotSame(1086, $result->getDistanceKm(), 'distance reflects LHR→FRA, not the old route');
+	}
+
 	public function testCreateAppendsToEndOfDay(): void {
 		$captured = null;
 		$this->mapper->method('maxDaySeqForDate')->with('alice', '2026-05-01')->willReturn(2);
@@ -555,5 +631,84 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame('Copenhagen Kastrup', $missing->getOriginLabel(), 'recheck rewrites the label too');
 		// The flight that already had codes was skipped entirely.
 		$this->assertSame('London', $withCode->getDestinationLabel());
+	}
+
+	public function testReconcileAllScopeAllRefreshesFromCodeNotLabel(): void {
+		// The demo-data scenario: a flight has valid codes but human labels that
+		// don't themselves resolve ("Dublin"). A full recheck must refresh from
+		// the code (and may tidy the label) — never clear the code because the
+		// label failed to resolve.
+		$flight = new Flight();
+		$flight->setOriginLabel('Dublin');
+		$flight->setOriginCode('DUB');
+		$flight->setDestinationLabel('Frankfurt am Main');
+		$flight->setDestinationCode('FRA');
+		$flight->setDistanceKm(1086);
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		// Resolving the labels fails; resolving the codes succeeds.
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Dublin', null],
+			['Frankfurt am Main', null],
+			['DUB', new AirportMatch('DUB', 'Dublin Airport', 53.4213, -6.2701)],
+			['FRA', new AirportMatch('FRA', 'Frankfurt am Main International Airport', 50.0264, 8.5431)],
+		]);
+
+		$result = $this->service->reconcileAll('alice', false);
+
+		$this->assertSame('DUB', $flight->getOriginCode(), 'code preserved, not cleared');
+		$this->assertSame('FRA', $flight->getDestinationCode(), 'code preserved, not cleared');
+		$this->assertSame('Dublin Airport', $flight->getOriginLabel(), 'label refreshed to reference name');
+		$this->assertSame('Frankfurt am Main International Airport', $flight->getDestinationLabel());
+		$this->assertNotNull($flight->getDistanceKm(), 'distance recomputed from reference coords');
+		$this->assertSame(2, $result['matched']);
+		$this->assertSame(0, $result['unmatched']);
+	}
+
+	public function testReconcileAllScopeAllPreservesCodesWhenNoReferenceData(): void {
+		// On an instance with no reference data loaded, every code lookup returns
+		// null. A full recheck must leave fully-coded flights completely untouched
+		// rather than wiping their codes and distance.
+		$flight = new Flight();
+		$flight->setOriginLabel('Dublin');
+		$flight->setOriginCode('DUB');
+		$flight->setDestinationLabel('Frankfurt am Main');
+		$flight->setDestinationCode('FRA');
+		$flight->setDistanceKm(1086);
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->reconciler->method('resolve')->willReturn(null);
+		$this->mapper->expects($this->never())->method('update');
+
+		$result = $this->service->reconcileAll('alice', false);
+
+		$this->assertSame('DUB', $flight->getOriginCode());
+		$this->assertSame('FRA', $flight->getDestinationCode());
+		$this->assertSame('Dublin', $flight->getOriginLabel());
+		$this->assertSame(1086, $flight->getDistanceKm(), 'distance untouched');
+		$this->assertSame(0, $result['updated']);
+	}
+
+	public function testReconcileAllScopeAllCanonicalisesIcaoToIata(): void {
+		// A code-present refresh resolves the stored code and adopts the canonical
+		// code from the reference (IATA preferred over ICAO).
+		$flight = new Flight();
+		$flight->setOriginLabel('Dublin Airport');
+		$flight->setOriginCode('EIDW');
+		$flight->setDestinationLabel('Frankfurt am Main International Airport');
+		$flight->setDestinationCode('FRA');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->reconciler->method('resolve')->willReturnMap([
+			['EIDW', new AirportMatch('DUB', 'Dublin Airport', 53.4213, -6.2701)],
+			['FRA', new AirportMatch('FRA', 'Frankfurt am Main International Airport', 50.0264, 8.5431)],
+		]);
+
+		$result = $this->service->reconcileAll('alice', false);
+
+		$this->assertSame('DUB', $flight->getOriginCode(), 'ICAO code canonicalised to IATA');
+		$this->assertSame(1, $result['updated']);
 	}
 }

@@ -91,7 +91,30 @@ class FlightService {
 		$flight = $this->find($id, $userId);
 		$this->validate($data);
 		$oldDate = $flight->getFlightDate();
-		$this->applyData($flight, $data);
+		$oldDistance = $flight->getDistanceKm();
+
+		// Resolve endpoints against the existing flight *before* overwriting it.
+		// An origin/destination whose label is unchanged is preserved verbatim
+		// rather than re-reconciled: re-resolving an unchanged label can wipe a
+		// valid code when the stored label is not itself resolvable — e.g. an
+		// imported city name like "Dublin" that matches no airport by name and is
+		// ambiguous by city. Without this, editing an unrelated field (the seat,
+		// say) would silently clear the route's code and distance.
+		[$oLabel, $oCode, $oLat, $oLon, $oKept] = $this->resolveEndpointForUpdate(
+			$data, 'originLabel', 'originCode', $flight->getOriginLabel(), $flight->getOriginCode());
+		[$dLabel, $dCode, $dLat, $dLon, $dKept] = $this->resolveEndpointForUpdate(
+			$data, 'destinationLabel', 'destinationCode', $flight->getDestinationLabel(), $flight->getDestinationCode());
+
+		$this->applyScalars($flight, $data);
+		$flight->setOriginLabel($oLabel);
+		$flight->setOriginCode($oCode);
+		$flight->setDestinationLabel($dLabel);
+		$flight->setDestinationCode($dCode);
+		// Both sides preserved → keep the stored distance verbatim (so an instance
+		// with no reference data doesn't drop it on an unrelated edit). Otherwise
+		// recompute from whatever coordinates the resolution produced.
+		$flight->setDistanceKm($oKept && $dKept ? $oldDistance : $this->distanceKm($oLat, $oLon, $dLat, $dLon));
+
 		if ($flight->getFlightDate() !== $oldDate) {
 			// Re-dated onto a different day: append to the end of the new day. The
 			// old day keeps its gap (harmless — only relative order matters).
@@ -146,7 +169,14 @@ class FlightService {
 	 * Re-run airport reconciliation across the user's flights.
 	 *
 	 * When $onlyMissing is true, a side (origin/destination) is skipped if it
-	 * already has a code; otherwise every side with a label is re-resolved.
+	 * already has a code; otherwise every side is refreshed.
+	 *
+	 * Each processed side follows the hybrid rule (see refreshEndpoint): a side
+	 * that already has a code is refreshed *from that canonical code* (a failed
+	 * lookup leaves it untouched, never clearing a valid code), while a code-less
+	 * side is resolved from its free-text label as on create. This makes a bulk
+	 * recheck safe for imported/backup data whose label is not itself resolvable,
+	 * and non-destructive on an instance with no reference data loaded.
 	 *
 	 * @return array{flights: int, updated: int, matched: int, unmatched: int}
 	 */
@@ -158,21 +188,20 @@ class FlightService {
 
 		foreach ($flights as $flight) {
 			$changed = false;
-			// Distance is only recomputed when both sides are resolved in this
-			// pass; a side skipped under $onlyMissing leaves the distance as-is.
+			// Distance is only recomputed when both sides resolved to coordinates
+			// in this pass; a skipped or preserved-without-match side leaves it.
 			$originMatch = null;
 			$destMatch = null;
-			$originResolved = false;
-			$destResolved = false;
+			$originProcessed = false;
+			$destProcessed = false;
 
 			if ($flight->getOriginLabel() !== null
 				&& !($onlyMissing && $flight->getOriginCode() !== null)) {
-				$originResolved = true;
-				$originMatch = $this->reconciler->resolve($flight->getOriginLabel());
-				$originMatch === null ? $unmatched++ : $matched++;
-				[$label, $code, $sideChanged] = $this->reapplyMatch(
-					$originMatch, $flight->getOriginLabel(), $flight->getOriginCode(),
+				$originProcessed = true;
+				[$label, $code, $originMatch, $sideChanged] = $this->refreshEndpoint(
+					$flight->getOriginLabel(), $flight->getOriginCode(),
 				);
+				$originMatch === null ? $unmatched++ : $matched++;
 				if ($sideChanged) {
 					$flight->setOriginLabel($label);
 					$flight->setOriginCode($code);
@@ -182,12 +211,11 @@ class FlightService {
 
 			if ($flight->getDestinationLabel() !== null
 				&& !($onlyMissing && $flight->getDestinationCode() !== null)) {
-				$destResolved = true;
-				$destMatch = $this->reconciler->resolve($flight->getDestinationLabel());
-				$destMatch === null ? $unmatched++ : $matched++;
-				[$label, $code, $sideChanged] = $this->reapplyMatch(
-					$destMatch, $flight->getDestinationLabel(), $flight->getDestinationCode(),
+				$destProcessed = true;
+				[$label, $code, $destMatch, $sideChanged] = $this->refreshEndpoint(
+					$flight->getDestinationLabel(), $flight->getDestinationCode(),
 				);
+				$destMatch === null ? $unmatched++ : $matched++;
 				if ($sideChanged) {
 					$flight->setDestinationLabel($label);
 					$flight->setDestinationCode($code);
@@ -195,10 +223,10 @@ class FlightService {
 				}
 			}
 
-			if ($originResolved && $destResolved) {
+			if ($originProcessed && $destProcessed && $originMatch !== null && $destMatch !== null) {
 				$distance = $this->distanceKm(
-					$originMatch?->lat, $originMatch?->lon,
-					$destMatch?->lat, $destMatch?->lon,
+					$originMatch->lat, $originMatch->lon,
+					$destMatch->lat, $destMatch->lon,
 				);
 				if ($distance !== $flight->getDistanceKm()) {
 					$flight->setDistanceKm($distance);
@@ -246,7 +274,7 @@ class FlightService {
 	}
 
 	private function applyData(Flight $flight, array $data): void {
-		$flight->setFlightDate((string)$this->str($data, 'flightDate'));
+		$this->applyScalars($flight, $data);
 
 		[$originLabel, $originCode, $originLat, $originLon] = $this->resolveEndpoint($data, 'originLabel', 'originCode');
 		[$destinationLabel, $destinationCode, $destLat, $destLon] = $this->resolveEndpoint($data, 'destinationLabel', 'destinationCode');
@@ -255,6 +283,15 @@ class FlightService {
 		$flight->setDestinationLabel($destinationLabel);
 		$flight->setDestinationCode($destinationCode);
 		$flight->setDistanceKm($this->distanceKm($originLat, $originLon, $destLat, $destLon));
+	}
+
+	/**
+	 * Apply every non-endpoint field (date plus the free-text/metadata columns).
+	 * Split out so update() can refresh these without re-running the airport
+	 * resolution that applyData() does for origin/destination.
+	 */
+	private function applyScalars(Flight $flight, array $data): void {
+		$flight->setFlightDate((string)$this->str($data, 'flightDate'));
 		$flight->setAirlineCode($this->upper($this->str($data, 'airlineCode')));
 		$flight->setFlightNumber($this->str($data, 'flightNumber'));
 		$flight->setAircraftTypeCode($this->upper($this->str($data, 'aircraftTypeCode')));
@@ -293,6 +330,39 @@ class FlightService {
 	}
 
 	/**
+	 * Resolve one endpoint for an update, preserving a previously reconciled
+	 * endpoint whose label the user left unchanged.
+	 *
+	 * An explicit client-supplied code still wins (as in create). Otherwise, when
+	 * the submitted label equals the stored label and the endpoint already has a
+	 * code, the stored label+code are kept and coordinates are refreshed by
+	 * resolving that code (exact and reliable) for the distance calc. Only a
+	 * changed (or never-coded) label is reconciled afresh, exactly as create does
+	 * — so re-reconciliation, and the code-clearing it can cause, happens only for
+	 * an endpoint the user actually edited.
+	 *
+	 * `kept` (the 5th element) is true when the endpoint was preserved unchanged.
+	 *
+	 * @param array<array-key, mixed> $data
+	 * @return array{0: ?string, 1: ?string, 2: ?float, 3: ?float, 4: bool} [label, code, lat, lon, kept]
+	 */
+	private function resolveEndpointForUpdate(array $data, string $labelKey, string $codeKey, ?string $oldLabel, ?string $oldCode): array {
+		$explicitCode = $this->upper($this->str($data, $codeKey));
+		if ($explicitCode !== null) {
+			return [$this->str($data, $labelKey), $explicitCode, null, null, false];
+		}
+
+		$label = $this->str($data, $labelKey);
+		if ($oldCode !== null && $label === $oldLabel) {
+			$match = $this->reconciler->resolve($oldCode);
+			return [$oldLabel, $oldCode, $match?->lat, $match?->lon, true];
+		}
+
+		[$newLabel, $code, $lat, $lon] = $this->resolveEndpoint($data, $labelKey, $codeKey);
+		return [$newLabel, $code, $lat, $lon, false];
+	}
+
+	/**
 	 * Whole-km great-circle distance, or null unless both endpoints have coords.
 	 */
 	private function distanceKm(?float $lat1, ?float $lon1, ?float $lat2, ?float $lon2): ?int {
@@ -303,18 +373,37 @@ class FlightService {
 	}
 
 	/**
-	 * Compute the new label/code for one endpoint when re-running reconciliation
-	 * over an existing flight. No match clears a stale code but keeps the label.
+	 * Refresh one endpoint during a bulk recheck, following the hybrid rule:
 	 *
-	 * @return array{0: ?string, 1: ?string, 2: bool} [label, code, changed]
+	 *   - Code already present → refresh *from the canonical code* (code → name /
+	 *     coords). A failed lookup (e.g. no reference data, or an unknown code)
+	 *     leaves the endpoint untouched rather than clearing a valid code — the
+	 *     code is authoritative once set. A hit may canonicalise the code (ICAO →
+	 *     IATA) and rewrite the label to the reference name.
+	 *   - No code yet → resolve the free-text label (label → code), exactly as on
+	 *     create; a null result leaves the label and the (still null) code.
+	 *
+	 * `match` carries the reference coordinates for the distance recompute.
+	 *
+	 * @return array{0: ?string, 1: ?string, 2: ?AirportMatch, 3: bool} [label, code, match, changed]
 	 */
-	private function reapplyMatch(?AirportMatch $match, ?string $label, ?string $code): array {
-		if ($match === null) {
-			return [$label, null, $code !== null];
+	private function refreshEndpoint(?string $label, ?string $code): array {
+		if ($code !== null) {
+			$match = $this->reconciler->resolve($code);
+			if ($match === null) {
+				return [$label, $code, null, false];
+			}
+			$newLabel = $match->name ?? $label;
+			$newCode = $match->code ?? $code;
+			$changed = $newLabel !== $label || $newCode !== $code;
+			return [$newLabel, $newCode, $match, $changed];
 		}
-		$newLabel = $match->name ?? $label;
-		$changed = $newLabel !== $label || $match->code !== $code;
-		return [$newLabel, $match->code, $changed];
+
+		$match = $this->reconciler->resolve($label);
+		if ($match === null) {
+			return [$label, null, null, false];
+		}
+		return [$match->name ?? $label, $match->code, $match, true];
 	}
 
 	private function str(array $data, string $key): ?string {
