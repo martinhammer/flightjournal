@@ -171,6 +171,34 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 		})
 	}
 
+	// Unmatched airports: legs where an endpoint did not resolve to a reference
+	// code (a null `_code` means "no confident match"). The FilterPicker only
+	// offers this when reference data exists, but the matcher itself is purely
+	// client-side and needs no list context.
+	if (query.unmatched === '1') {
+		filters.push({
+			id: 'unmatched',
+			label: 'Unmatched airports',
+			queryKeys: ['unmatched'],
+			matches: (f) => !f.originCode || !f.destinationCode,
+		})
+	}
+
+	// Days with multiple flights: every leg whose `flight_date` carries more than
+	// one flight, so the user can find and reorder same-day legs. The multi-day
+	// set is derived from the full list, so this filter keeps whole days intact —
+	// which is what lets the Flights view still allow reordering under it.
+	if (query.multiday === '1') {
+		const perDate = new Map<string, number>()
+		for (const f of flights) perDate.set(f.flightDate, (perDate.get(f.flightDate) ?? 0) + 1)
+		filters.push({
+			id: 'multiday',
+			label: 'Days with multiple flights',
+			queryKeys: ['multiday'],
+			matches: (f) => (perDate.get(f.flightDate) ?? 0) > 1,
+		})
+	}
+
 	const flightId = typeof query.flight === 'string' ? Number(query.flight) : NaN
 	if (Number.isInteger(flightId) && flightId > 0) {
 		const match = flights.find((f) => f.id === flightId)

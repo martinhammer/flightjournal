@@ -17,6 +17,11 @@ vi.mock('vue-router', async (importOriginal) => ({
 	useRouter: () => ({ push }),
 }))
 
+// The picker probes airport reference data on mount to decide whether to offer
+// the "Unmatched airports" filter. Mock it so each test controls the count.
+const { listAirports } = vi.hoisted(() => ({ listAirports: vi.fn() }))
+vi.mock('../../src/api.ts', () => ({ listAirports }))
+
 import FilterPicker from '../../src/components/FilterPicker.vue'
 import type { Flight } from '../../src/types.ts'
 
@@ -115,6 +120,7 @@ const NcTextField = defineComponent({
 const stubs = {
 	NcActions: NcActionsStub,
 	NcActionButton,
+	NcActionSeparator: true,
 	NcCheckboxRadioSwitch,
 	NcButton,
 	NcDateTimePickerNative,
@@ -132,7 +138,16 @@ function render(flights: Flight[] = []) {
 beforeEach(() => {
 	push.mockClear()
 	routeHolder.query = {}
+	// Default: no reference data, so the "Unmatched airports" item is hidden.
+	listAirports.mockReset()
+	listAirports.mockResolvedValue({ items: [], total: 0, limit: 1, offset: 0 })
 })
+
+// Text of every menu action button (after onMounted's reference-data probe).
+async function menuItems(wrapper: ReturnType<typeof render>): Promise<string[]> {
+	await flushPromises()
+	return wrapper.findAll('.action-btn').map((b) => b.text())
+}
 
 // Picker order in the NcActions menu: Date range (0), Cabin class (1),
 // Airline (2), Aircraft type (3).
@@ -268,5 +283,65 @@ describe('FilterPicker — airline / aircraft', () => {
 			name: 'flights',
 			query: { airport: 'LHR', airportDir: 'either', airline: 'EY' },
 		})
+	})
+})
+
+describe('FilterPicker — unmatched airports', () => {
+	it('hides the item when the instance has no reference data', async () => {
+		const wrapper = render()
+		expect(await menuItems(wrapper)).not.toContain('Unmatched airports')
+	})
+
+	it('shows the item when reference data exists', async () => {
+		listAirports.mockResolvedValue({ items: [], total: 42, limit: 1, offset: 0 })
+		const wrapper = render()
+		expect(await menuItems(wrapper)).toContain('Unmatched airports')
+	})
+
+	it('hides the item when the filter is already active', async () => {
+		listAirports.mockResolvedValue({ items: [], total: 42, limit: 1, offset: 0 })
+		routeHolder.query = { unmatched: '1' }
+		const wrapper = render()
+		expect(await menuItems(wrapper)).not.toContain('Unmatched airports')
+	})
+
+	it('commits unmatched=1 on click, preserving other keys', async () => {
+		listAirports.mockResolvedValue({ items: [], total: 42, limit: 1, offset: 0 })
+		routeHolder.query = { airline: 'EY' }
+		const wrapper = render()
+		await flushPromises()
+		const item = wrapper.findAll('.action-btn').find((b) => b.text() === 'Unmatched airports')!
+		await item.trigger('click')
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { airline: 'EY', unmatched: '1' } })
+	})
+})
+
+describe('FilterPicker — days with multiple flights', () => {
+	it('hides the item when no date has more than one flight', async () => {
+		const flights = [flight(1, { flightDate: '2026-01-01' }), flight(2, { flightDate: '2026-01-02' })]
+		const wrapper = render(flights)
+		expect(await menuItems(wrapper)).not.toContain('Days with multiple flights')
+	})
+
+	it('shows the item when a date carries more than one flight', async () => {
+		const flights = [flight(1, { flightDate: '2026-01-01' }), flight(2, { flightDate: '2026-01-01' })]
+		const wrapper = render(flights)
+		expect(await menuItems(wrapper)).toContain('Days with multiple flights')
+	})
+
+	it('hides the item when the filter is already active', async () => {
+		routeHolder.query = { multiday: '1' }
+		const flights = [flight(1, { flightDate: '2026-01-01' }), flight(2, { flightDate: '2026-01-01' })]
+		const wrapper = render(flights)
+		expect(await menuItems(wrapper)).not.toContain('Days with multiple flights')
+	})
+
+	it('commits multiday=1 on click', async () => {
+		const flights = [flight(1, { flightDate: '2026-01-01' }), flight(2, { flightDate: '2026-01-01' })]
+		const wrapper = render(flights)
+		await flushPromises()
+		const item = wrapper.findAll('.action-btn').find((b) => b.text() === 'Days with multiple flights')!
+		await item.trigger('click')
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { multiday: '1' } })
 	})
 })

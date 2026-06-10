@@ -105,9 +105,16 @@ const sortedFlights = computed<Flight[]>(() => {
 
 const visibleFlights = computed<Flight[]>(() => applyFilters(sortedFlights.value, activeFilters.value))
 
-// Within-day reordering only makes sense in the natural date-sorted, unfiltered
-// view — otherwise the visual neighbour isn't the day-order neighbour.
-const canReorder = computed(() => sortKey.value === 'date' && activeFilters.value.length === 0)
+// Within-day reordering only makes sense in the natural date-sorted view where
+// the visual neighbour is the day-order neighbour. That holds with no filters,
+// and also under the "Days with multiple flights" filter alone — it keeps whole
+// days intact (it's there precisely to make reordering easier). Any other filter
+// can drop legs from a day, breaking the neighbour relationship.
+const canReorder = computed(() => {
+	if (sortKey.value !== 'date') return false
+	const filters = activeFilters.value
+	return filters.length === 0 || (filters.length === 1 && filters[0].id === 'multiday')
+})
 
 function sameDayPrev(i: number): boolean {
 	const list = visibleFlights.value

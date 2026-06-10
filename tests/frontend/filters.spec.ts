@@ -116,6 +116,26 @@ describe('buildFilters', () => {
 	it('drops empty or duplicate CSV entries', () => {
 		expect(buildFilters({ airline: ' ,ey, ,ey ' })[0].label).toBe('Airline: EY')
 	})
+
+	it('builds an unmatched-airports filter', () => {
+		const filters = buildFilters({ unmatched: '1' })
+		expect(filters).toHaveLength(1)
+		expect(filters[0].id).toBe('unmatched')
+		expect(filters[0].label).toBe('Unmatched airports')
+		expect(filters[0].queryKeys).toEqual(['unmatched'])
+	})
+
+	it('ignores an unmatched value other than "1"', () => {
+		expect(buildFilters({ unmatched: '0' })).toEqual([])
+	})
+
+	it('builds a days-with-multiple-flights filter', () => {
+		const filters = buildFilters({ multiday: '1' })
+		expect(filters).toHaveLength(1)
+		expect(filters[0].id).toBe('multiday')
+		expect(filters[0].label).toBe('Days with multiple flights')
+		expect(filters[0].queryKeys).toEqual(['multiday'])
+	})
 })
 
 describe('new filter matchers', () => {
@@ -162,6 +182,30 @@ describe('new filter matchers', () => {
 		]
 		const filtered = applyFilters(list, buildFilters({ aircraft: 'B789' }))
 		expect(filtered.map((x) => x.id).sort()).toEqual([2])
+	})
+
+	it('unmatched matches legs missing either airport code', () => {
+		const list = [
+			f({ id: 1, originCode: 'LHR', destinationCode: 'JFK' }),
+			f({ id: 2, originCode: null, destinationCode: 'JFK' }),
+			f({ id: 3, originCode: 'LHR', destinationCode: null }),
+			f({ id: 4, originCode: null, destinationCode: null }),
+		]
+		const filtered = applyFilters(list, buildFilters({ unmatched: '1' }))
+		expect(filtered.map((x) => x.id).sort()).toEqual([2, 3, 4])
+	})
+
+	it('multiday matches only legs on dates with more than one flight', () => {
+		const list = [
+			f({ id: 1, flightDate: '2026-01-01' }),
+			f({ id: 2, flightDate: '2026-01-01' }),
+			f({ id: 3, flightDate: '2026-01-02' }),
+			f({ id: 4, flightDate: '2026-01-03' }),
+			f({ id: 5, flightDate: '2026-01-03' }),
+		]
+		// The multi-day set is derived from the list passed to buildFilters.
+		const filtered = applyFilters(list, buildFilters({ multiday: '1' }, list))
+		expect(filtered.map((x) => x.id).sort()).toEqual([1, 2, 4, 5])
 	})
 })
 
