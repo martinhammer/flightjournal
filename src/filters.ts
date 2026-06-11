@@ -17,6 +17,20 @@ export interface ActiveFilter {
 
 export type AirportDirection = 'to' | 'from' | 'either'
 
+// Query token (case-insensitive) that selects flights whose field is null or
+// empty. Parenthesised so it can never collide with a real (alphanumeric)
+// airline / aircraft code or cabin value. Shared with the FilterPicker so the
+// menu option and the URL it produces stay in lockstep.
+export const BLANK_FILTER = '(blank)'
+
+// Pull the blank sentinel out of a parsed CSV value, returning the remaining
+// (non-blank) values plus whether blank was requested. csvParam() has already
+// uppercased, so we compare against the uppercase form.
+function splitBlank(values: string[]): { values: string[], blank: boolean } {
+	const token = BLANK_FILTER.toUpperCase()
+	return { values: values.filter((v) => v !== token), blank: values.includes(token) }
+}
+
 function airportDirection(value: unknown): AirportDirection | null {
 	return value === 'to' || value === 'from' || value === 'either' ? value : null
 }
@@ -127,46 +141,55 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 
 	// Cabin class: closed enum, multi-value via CSV. Values that don't match a
 	// known cabin are silently dropped so a broken URL doesn't reject everything.
-	const cabins = csvParam(query.cabin)
+	// The blank sentinel additionally matches legs with no cabin recorded.
+	const { values: cabinValues, blank: cabinBlank } = splitBlank(csvParam(query.cabin))
+	const cabins = cabinValues
 		.map((c) => c.toLowerCase())
 		.filter((c) => c in CABIN_LABELS)
-	if (cabins.length > 0) {
+	if (cabins.length > 0 || cabinBlank) {
 		const cabinSet = new Set(cabins)
-		const label = `Cabin: ${cabins.map((c) => CABIN_LABELS[c]).join(', ')}`
+		const parts = cabins.map((c) => CABIN_LABELS[c])
+		if (cabinBlank) parts.push(BLANK_FILTER)
 		filters.push({
 			id: 'cabin',
-			label,
+			label: `Cabin: ${parts.join(', ')}`,
 			queryKeys: ['cabin'],
-			matches: (f) => f.cabinClass !== null && cabinSet.has(f.cabinClass),
+			matches: (f) => (cabinBlank && !f.cabinClass) || (f.cabinClass !== null && cabinSet.has(f.cabinClass)),
 		})
 	}
 
-	// Airline: free-form CSV (we don't know every possible code up front).
-	const airlines = csvParam(query.airline)
-	if (airlines.length > 0) {
+	// Airline: free-form CSV (we don't know every possible code up front). The
+	// blank sentinel matches legs with no airline code recorded.
+	const { values: airlines, blank: airlineBlank } = splitBlank(csvParam(query.airline))
+	if (airlines.length > 0 || airlineBlank) {
 		const airlineSet = new Set(airlines)
+		const parts = [...airlines]
+		if (airlineBlank) parts.push(BLANK_FILTER)
 		filters.push({
 			id: 'airline',
-			label: `Airline: ${airlines.join(', ')}`,
+			label: `Airline: ${parts.join(', ')}`,
 			queryKeys: ['airline'],
-			matches: (f) => f.airlineCode !== null && airlineSet.has(f.airlineCode.toUpperCase()),
+			matches: (f) => (airlineBlank && !f.airlineCode) || (f.airlineCode !== null && airlineSet.has(f.airlineCode.toUpperCase())),
 		})
 	}
 
 	// Aircraft type: same shape as airline. We compare against the table's
 	// display value (raw-then-code) because many flights only have
 	// aircraftTypeRaw populated; the option list in the picker uses the same
-	// fallback so what you see is what you can filter on.
-	const aircraft = csvParam(query.aircraft)
-	if (aircraft.length > 0) {
+	// fallback so what you see is what you can filter on. The blank sentinel
+	// matches legs with neither raw nor canonical type.
+	const { values: aircraft, blank: aircraftBlank } = splitBlank(csvParam(query.aircraft))
+	if (aircraft.length > 0 || aircraftBlank) {
 		const aircraftSet = new Set(aircraft)
+		const parts = [...aircraft]
+		if (aircraftBlank) parts.push(BLANK_FILTER)
 		filters.push({
 			id: 'aircraft',
-			label: `Aircraft: ${aircraft.join(', ')}`,
+			label: `Aircraft: ${parts.join(', ')}`,
 			queryKeys: ['aircraft'],
 			matches: (f) => {
 				const display = f.aircraftTypeRaw ?? f.aircraftTypeCode
-				return display !== null && aircraftSet.has(display.toUpperCase())
+				return (aircraftBlank && !display) || (display !== null && aircraftSet.has(display.toUpperCase()))
 			},
 		})
 	}

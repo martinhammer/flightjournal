@@ -87,6 +87,17 @@ describe('buildFilters', () => {
 		expect(buildFilters({ cabin: 'sleeper' })).toEqual([])
 	})
 
+	it('builds a cabin filter from the blank sentinel, alone or combined', () => {
+		expect(buildFilters({ cabin: '(blank)' })[0].label).toBe('Cabin: (blank)')
+		expect(buildFilters({ cabin: 'business,(BLANK)' })[0].label).toBe('Cabin: Business, (blank)')
+	})
+
+	it('builds airline / aircraft filters from the blank sentinel', () => {
+		expect(buildFilters({ airline: '(blank)' })[0].label).toBe('Airline: (blank)')
+		expect(buildFilters({ airline: 'ey,(blank)' })[0].label).toBe('Airline: EY, (blank)')
+		expect(buildFilters({ aircraft: '(blank)' })[0].label).toBe('Aircraft: (blank)')
+	})
+
 	it('builds a date-range filter and renders "…" for the open side', () => {
 		expect(buildFilters({ dateFrom: '2025-01-01', dateTo: '2025-06-30' })[0].label)
 			.toBe('2025-01-01 → 2025-06-30')
@@ -150,6 +161,35 @@ describe('new filter matchers', () => {
 		]
 		const filtered = applyFilters(list, buildFilters({ cabin: 'business,first' }))
 		expect(filtered.map((x) => x.id).sort()).toEqual([1, 2])
+	})
+
+	it('cabin blank sentinel matches null/empty, and combines with a class (OR)', () => {
+		const list = [
+			f({ id: 1, cabinClass: 'business' }),
+			f({ id: 2, cabinClass: null }),
+			f({ id: 3, cabinClass: '' as unknown as null }),
+			f({ id: 4, cabinClass: 'economy' }),
+		]
+		expect(applyFilters(list, buildFilters({ cabin: '(blank)' })).map((x) => x.id).sort()).toEqual([2, 3])
+		expect(applyFilters(list, buildFilters({ cabin: 'business,(blank)' })).map((x) => x.id).sort()).toEqual([1, 2, 3])
+	})
+
+	it('airline blank sentinel matches null/empty codes', () => {
+		const list = [
+			f({ id: 1, airlineCode: 'EY' }),
+			f({ id: 2, airlineCode: null }),
+			f({ id: 3, airlineCode: '' as unknown as null }),
+		]
+		expect(applyFilters(list, buildFilters({ airline: '(blank)' })).map((x) => x.id).sort()).toEqual([2, 3])
+	})
+
+	it('aircraft blank sentinel matches legs with neither raw nor code', () => {
+		const list = [
+			f({ id: 1, aircraftTypeCode: 'B77W', aircraftTypeRaw: null }),
+			f({ id: 2, aircraftTypeCode: null, aircraftTypeRaw: null }),
+			f({ id: 3, aircraftTypeCode: null, aircraftTypeRaw: 'B738-8 MAX' }),
+		]
+		expect(applyFilters(list, buildFilters({ aircraft: '(blank)' })).map((x) => x.id).sort()).toEqual([2])
 	})
 
 	it('date range is inclusive on both ends', () => {

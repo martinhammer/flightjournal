@@ -10,7 +10,14 @@ import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNa
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import { listAirports } from '../api.ts'
+import { BLANK_FILTER } from '../filters.ts'
 import { CABIN_CLASSES, type Flight } from '../types.ts'
+
+// The blank sentinel as staged in each editor: cabin values are kept lowercase,
+// airline / aircraft codes uppercase (matching how each set is prefilled and
+// committed). Both round-trip to the same case-insensitive query token.
+const BLANK_CABIN = BLANK_FILTER.toLowerCase()
+const BLANK_CODE = BLANK_FILTER.toUpperCase()
 
 // The four v1 filter types. All four use the same NcPopover editor surface for
 // a consistent Apply-button style; the NcActions menu only does type selection.
@@ -310,6 +317,11 @@ const editorTitle = computed(() => {
 
 			<template v-else-if="editorType === 'cabin'">
 				<NcCheckboxRadioSwitch
+					:model-value="stagedCabins.has(BLANK_CABIN)"
+					@update:model-value="(v: boolean) => toggleCabin(BLANK_CABIN, v)">
+					{{ BLANK_FILTER }}
+				</NcCheckboxRadioSwitch>
+				<NcCheckboxRadioSwitch
 					v-for="c in CABIN_CLASSES"
 					:key="c.value"
 					:model-value="stagedCabins.has(c.value)"
@@ -332,6 +344,11 @@ const editorTitle = computed(() => {
 					label="Search"
 					placeholder="Search airlines"
 					@update:model-value="airlineSearch = String($event)" />
+				<NcCheckboxRadioSwitch
+					:model-value="stagedAirlines.has(BLANK_CODE)"
+					@update:model-value="(v: boolean) => toggleAirline(BLANK_CODE, v)">
+					{{ BLANK_FILTER }}
+				</NcCheckboxRadioSwitch>
 				<div class="filter-popover__list">
 					<div v-if="filteredAirlineOptions.length === 0" class="filter-popover__empty">
 						No airlines match the search.
@@ -360,6 +377,11 @@ const editorTitle = computed(() => {
 					label="Search"
 					placeholder="Search aircraft types"
 					@update:model-value="aircraftSearch = String($event)" />
+				<NcCheckboxRadioSwitch
+					:model-value="stagedAircraft.has(BLANK_CODE)"
+					@update:model-value="(v: boolean) => toggleAircraft(BLANK_CODE, v)">
+					{{ BLANK_FILTER }}
+				</NcCheckboxRadioSwitch>
 				<div class="filter-popover__list">
 					<div v-if="filteredAircraftOptions.length === 0" class="filter-popover__empty">
 						No aircraft types match the search.

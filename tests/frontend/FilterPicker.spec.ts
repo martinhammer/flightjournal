@@ -157,11 +157,23 @@ describe('FilterPicker — cabin', () => {
 		const wrapper = render()
 		await wrapper.findAll('.action-btn')[1].trigger('click')
 		await flushPromises()
-		// Tick Business (index 2 in CABIN_CLASSES: economy, premium_economy, business).
+		// Index 0 is the pinned "(blank)" option; CABIN_CLASSES follow (economy,
+		// premium_economy, business, …), so Business is index 3.
 		const checkboxes = wrapper.findAll('.cabin-checkbox input')
-		await checkboxes[2].setValue(true)
+		await checkboxes[3].setValue(true)
 		await wrapper.find('.apply-btn').trigger('click')
 		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { cabin: 'business' } })
+	})
+
+	it('applies the blank cabin sentinel', async () => {
+		const wrapper = render()
+		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await flushPromises()
+		// "(blank)" is the pinned first checkbox, above the cabin classes.
+		const checkboxes = wrapper.findAll('.cabin-checkbox input')
+		await checkboxes[0].setValue(true)
+		await wrapper.find('.apply-btn').trigger('click')
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { cabin: '(blank)' } })
 	})
 
 	it('drops the cabin key when applied empty', async () => {
@@ -169,9 +181,9 @@ describe('FilterPicker — cabin', () => {
 		const wrapper = render()
 		await wrapper.findAll('.action-btn')[1].trigger('click')
 		await flushPromises()
-		// Untick business (prefilled from the URL).
+		// Untick business (prefilled from the URL); index 3 with blank pinned first.
 		const checkboxes = wrapper.findAll('.cabin-checkbox input')
-		await checkboxes[2].setValue(false)
+		await checkboxes[3].setValue(false)
 		await wrapper.find('.apply-btn').trigger('click')
 		expect(push).toHaveBeenCalledWith({ name: 'flights', query: {} })
 	})
@@ -227,10 +239,11 @@ describe('FilterPicker — airline / aircraft', () => {
 		const wrapper = render(flights)
 		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
-		// Options are sorted alphabetically: EK, EY, FZ. Tick EK and EY.
+		// A pinned "(blank)" option sits above the sorted code list: blank, EK,
+		// EY, FZ. Tick EK and EY.
 		const boxes = wrapper.findAll('.cabin-checkbox input')
-		await boxes[0].setValue(true)
 		await boxes[1].setValue(true)
+		await boxes[2].setValue(true)
 		await wrapper.find('.apply-btn').trigger('click')
 		expect(push).toHaveBeenCalledWith({
 			name: 'flights',
@@ -247,9 +260,10 @@ describe('FilterPicker — airline / aircraft', () => {
 		const wrapper = render(flights)
 		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
-		// Type "E" — should leave EK and EY, drop FZ.
+		// Type "E" — should leave EK and EY, drop FZ. The pinned "(blank)" option
+		// lives outside the searchable list, so it doesn't count here.
 		await wrapper.find('.text-input').setValue('E')
-		const visible = wrapper.findAll('.cabin-checkbox')
+		const visible = wrapper.findAll('.filter-popover__list .cabin-checkbox')
 		expect(visible).toHaveLength(2)
 	})
 
@@ -261,14 +275,25 @@ describe('FilterPicker — airline / aircraft', () => {
 		const wrapper = render(flights)
 		await wrapper.findAll('.action-btn')[3].trigger('click')
 		await flushPromises()
-		// Sorted: B77W, B789. Tick B77W.
+		// Pinned blank, then sorted: B77W, B789. Tick B77W.
 		const boxes = wrapper.findAll('.cabin-checkbox input')
-		await boxes[0].setValue(true)
+		await boxes[1].setValue(true)
 		await wrapper.find('.apply-btn').trigger('click')
 		expect(push).toHaveBeenCalledWith({
 			name: 'flights',
 			query: { aircraft: 'B77W' },
 		})
+	})
+
+	it('applies the blank airline sentinel from the pinned option', async () => {
+		const flights = [flight(1, { airlineCode: 'EY' })]
+		const wrapper = render(flights)
+		await wrapper.findAll('.action-btn')[2].trigger('click')
+		await flushPromises()
+		// boxes[0] is the pinned "(blank)" option.
+		await wrapper.findAll('.cabin-checkbox input')[0].setValue(true)
+		await wrapper.find('.apply-btn').trigger('click')
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { airline: '(BLANK)' } })
 	})
 
 	it('preserves other query keys when applying (filters compose)', async () => {
@@ -277,7 +302,8 @@ describe('FilterPicker — airline / aircraft', () => {
 		const wrapper = render(flights)
 		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
-		await wrapper.findAll('.cabin-checkbox input')[0].setValue(true)
+		// boxes[0] is the pinned "(blank)" option; the single airline EY is boxes[1].
+		await wrapper.findAll('.cabin-checkbox input')[1].setValue(true)
 		await wrapper.find('.apply-btn').trigger('click')
 		expect(push).toHaveBeenCalledWith({
 			name: 'flights',
