@@ -163,6 +163,23 @@ describe('ViewFlightLog filtering', () => {
 		expect(wrapper.find('.nc-button').exists()).toBe(false)
 	})
 
+	it('opens the edit screen when a row is double-clicked, carrying the active filter', async () => {
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		const wrapper = render()
+		// Both LHR-arriving legs match; sorted date-desc the newest (f3, id 3) is first.
+		await wrapper.findAll('tbody tr')[0].trigger('dblclick')
+		expect(push).toHaveBeenCalledWith({
+			path: '/flights/3/edit',
+			query: { airport: 'LHR', airportDir: 'to' },
+		})
+	})
+
+	it('does not open the edit screen when the reorder cell is double-clicked', async () => {
+		const wrapper = render()
+		await wrapper.findAll('tbody tr')[0].find('td.reorder').trigger('dblclick')
+		expect(push).not.toHaveBeenCalled()
+	})
+
 	it('opens a single flight on the Map view from its row menu', async () => {
 		const wrapper = render()
 		// First row is the newest flight (sorted by date desc) — f3, id 3.

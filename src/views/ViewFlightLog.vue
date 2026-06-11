@@ -246,7 +246,7 @@ async function remove(f: Flight) {
 					</tr>
 				</thead>
 				<tbody>
-					<tr v-for="(f, i) in visibleFlights" :key="f.id">
+					<tr v-for="(f, i) in visibleFlights" :key="f.id" @dblclick="edit(f)">
 						<td>{{ f.flightDate }}</td>
 						<td>{{ flightNo(f) }}</td>
 						<td>{{ routeLabel(f) }}</td>
@@ -257,7 +257,7 @@ async function remove(f: Flight) {
 						<td>{{ f.registration ?? '' }}</td>
 						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
 						<td>{{ f.seat ?? '' }}</td>
-						<td class="reorder">
+						<td class="reorder" @dblclick.stop>
 							<div v-if="hasDaySiblings(i)" class="reorder-controls">
 								<NcButton
 									variant="tertiary-no-background"
@@ -281,7 +281,7 @@ async function remove(f: Flight) {
 								</NcButton>
 							</div>
 						</td>
-						<td class="actions">
+						<td class="actions" @dblclick.stop>
 							<NcActions :force-menu="true">
 								<NcActionButton @click="viewFlightOnMap(f)">
 									<template #icon>
