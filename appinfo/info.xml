@@ -15,10 +15,10 @@
 		<nextcloud min-version="33" max-version="34"/>
 	</dependencies>
 	<settings>
-		<personal>OCA\FlightJournal\Settings\Personal</personal>
-		<personal-section>OCA\FlightJournal\Settings\PersonalSection</personal-section>
 		<admin>OCA\FlightJournal\Settings\Admin</admin>
 		<admin-section>OCA\FlightJournal\Settings\AdminSection</admin-section>
+		<personal>OCA\FlightJournal\Settings\Personal</personal>
+		<personal-section>OCA\FlightJournal\Settings\PersonalSection</personal-section>
 	</settings>
 	<navigations>
 		<navigation>
