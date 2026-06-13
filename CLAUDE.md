@@ -4,7 +4,7 @@ A Nextcloud app for tracking personal flight history. Built iteratively, core-fi
 
 ## Architecture
 
-Standard Nextcloud app shape. Backend in `lib/` (PHP 8.1+, AppFramework, no Doctrine ORM — use `QBMapper` + `IDBConnection`). Frontend in `src/` (Vue 3 + TypeScript, `@nextcloud/vue` components, Vite via `@nextcloud/vite-config`). Targets Nextcloud 31–32.
+Standard Nextcloud app shape. Backend in `lib/` (PHP 8.1+, AppFramework, no Doctrine ORM — use `QBMapper` + `IDBConnection`). Frontend in `src/` (Vue 3 + TypeScript, `@nextcloud/vue` components, Vite via `@nextcloud/vite-config`). Targets Nextcloud 33–34 (PHP 8.2+).
 
 ### Backend layout (`lib/`)
 
@@ -172,7 +172,7 @@ Reference data seeding/autocomplete, map, analytics, enrichment, import/export, 
 
 ## Known scaffold quirks
 
-- `composer.json` pins `nextcloud/ocp: dev-stable31` — keep in sync with `appinfo/info.xml` `min-version`.
+- `composer.json` pins `nextcloud/ocp: dev-stable34` (the top of the supported range). The Psalm matrix (`psalm-matrix.yml`) is auto-derived from `appinfo/info.xml`'s `min/max-version` (currently 33–34) via the `nextcloud-version-matrix` action — no separate version list to maintain. The weekly `update-nextcloud-ocp-matrix.yml` job bumps the pin; its `target` must track the chosen dev version (`stable34`). `psalm.xml`'s `phpVersion` must equal the matrix's computed `php-min` (8.2 for NC 33) — enforced by a grep step in `psalm-matrix.yml`. Keep `composer.json` `php`/`platform.php` (8.2) aligned with that floor.
 - **Dependabot npm major bumps gated by Nextcloud tooling peers.** Two bumps are parked, not mergeable: vite 7→8 (PR #16) and TypeScript 5→6 (PR #3). Both fail CI at `npm ci` with `ERESOLVE` — not a code issue. `@nextcloud/vite-config@2.5.2` hard-pins `vite: ^7.1.10`; `@nextcloud/eslint-config@8.4.2` hard-pins `typescript: ^5.0.2`. Bump those Nextcloud packages first; the vite/TS bumps follow only once their peer ranges widen. Don't force with `--legacy-peer-deps` (the org-templated `node.yml` workflow would also need editing, and edits there get overwritten).
 
 ## Testing
