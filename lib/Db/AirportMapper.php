@@ -142,10 +142,9 @@ class AirportMapper extends QBMapper {
 		$this->applySearch($qb, $q);
 		$this->applyCodes($qb, $codes);
 		$result = $qb->executeQuery();
-		/** @var array<string, mixed>|false $row */
 		$row = $result->fetch();
 		$result->closeCursor();
-		if ($row === false) {
+		if (!is_array($row)) {
 			return 0;
 		}
 		return (int)($row['cnt'] ?? 0);

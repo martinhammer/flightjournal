@@ -94,9 +94,8 @@ class FlightMapper extends QBMapper {
 				->andWhere($qb->expr()->isNotNull($column));
 			$result = $qb->executeQuery();
 			while (true) {
-				/** @var array<string, mixed>|false $row */
 				$row = $result->fetch();
-				if ($row === false) {
+				if (!is_array($row)) {
 					break;
 				}
 				if (is_string($row[$column]) && $row[$column] !== '') {
