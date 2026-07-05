@@ -24,6 +24,14 @@ const ocsConfig = {
 	},
 }
 
+const exportFilename = (ext: string) => {
+	const now = new Date()
+	const y = now.getFullYear()
+	const m = String(now.getMonth() + 1).padStart(2, '0')
+	const d = String(now.getDate()).padStart(2, '0')
+	return `flightjournal-export-${y}-${m}-${d}.${ext}`
+}
+
 const importContent = ref('')
 const importing = ref(false)
 const markdownDialogOpen = ref(false)
@@ -178,7 +186,7 @@ async function runJsonExport() {
 		const url = URL.createObjectURL(res.data)
 		const a = document.createElement('a')
 		a.href = url
-		a.download = 'flightjournal-export.json'
+		a.download = exportFilename('json')
 		document.body.appendChild(a)
 		a.click()
 		document.body.removeChild(a)
@@ -242,7 +250,7 @@ async function runExport() {
 		const url = URL.createObjectURL(res.data)
 		const a = document.createElement('a')
 		a.href = url
-		a.download = 'flightjournal-export.md'
+		a.download = exportFilename('md')
 		document.body.appendChild(a)
 		a.click()
 		document.body.removeChild(a)
