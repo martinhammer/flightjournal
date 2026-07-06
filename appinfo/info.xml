@@ -16,7 +16,7 @@
 	<screenshot>https://raw.githubusercontent.com/martinhammer/flightjournal/main/img/Screenshot_Map_01_2026-06-17.png</screenshot>
 	<screenshot>https://raw.githubusercontent.com/martinhammer/flightjournal/main/img/Screenshot_Map_02_2026-06-17.png</screenshot>
 	<dependencies>
-		<nextcloud min-version="33" max-version="34"/>
+		<nextcloud min-version="33" max-version="35"/>
 	</dependencies>
 	<settings>
 		<admin>OCA\FlightJournal\Settings\Admin</admin>
