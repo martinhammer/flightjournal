@@ -7,7 +7,7 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 		<div class="header">
 			<h2>Analytics</h2>
 		</div>
-		<NcEmptyContent name="Analytics" description="Analytics will appear here in a future milestone." />
+		<NcEmptyContent name="Analytics" description="Analytics will appear here in a future release." />
 	</div>
 </template>
 

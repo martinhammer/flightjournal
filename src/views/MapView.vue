@@ -128,6 +128,18 @@ const anchorCode = computed<string | null>(() => {
 
 const isEmpty = computed(() => !loading.value && airports.value.length === 0)
 
+// Distinguish "no flights at all" from "flights exist but none resolve to a
+// known airport" (the usual cause: airport reference data isn't loaded, so
+// reconciliation left every leg's code null).
+const emptyName = computed(() =>
+	store.flights.length > 0 ? 'No airports to map' : 'Nothing to map yet',
+)
+const emptyDescription = computed(() =>
+	store.flights.length > 0
+		? 'None of your flights have a recognised airport yet. An administrator can import airport reference data from the admin settings.'
+		: 'Add flights with recognised airports, or open an airport from the Airports view.',
+)
+
 const headerCount = computed(() => {
 	const total = store.flights.length
 	const shown = filteredFlights.value.length
@@ -491,8 +503,8 @@ onBeforeUnmount(() => {
 			</div>
 			<NcEmptyContent
 				v-else-if="isEmpty"
-				name="Nothing to map yet"
-				description="Add flights with recognised airports, or open an airport from the Airports view.">
+				:name="emptyName"
+				:description="emptyDescription">
 				<template #icon>
 					<MapMarkerOff />
 				</template>

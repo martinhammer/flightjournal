@@ -152,6 +152,12 @@ async function runDeleteAll() {
 			<p>Upload a JSON file containing an object keyed by ICAO code, e.g.:</p>
 			<code>{ "KOSH": { "icao": "KOSH", "iata": "OSH", "name": "Wittman Regional", "lat": 43.98, "lon": -88.55, "tz": "America/Chicago", ... } }</code>
 		</NcNoteCard>
+		<NcNoteCard type="info" class="instructions">
+			<p>
+				The <a href="https://github.com/mwgg/Airports" target="_blank" rel="noopener noreferrer">mwgg/Airports</a>
+				dataset is the standard reference set for this format and can be imported as-is.
+			</p>
+		</NcNoteCard>
 		<input
 			ref="fileInput"
 			type="file"
@@ -215,6 +221,16 @@ async function runDeleteAll() {
 	font-size: 0.85em;
 	word-break: break-all;
 	white-space: pre-wrap;
+}
+
+.instructions code.inline {
+	display: inline;
+	word-break: normal;
+	white-space: normal;
+}
+
+.instructions a {
+	text-decoration: underline;
 }
 
 .actions {
