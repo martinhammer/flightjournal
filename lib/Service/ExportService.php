@@ -28,7 +28,12 @@ class ExportService {
 			$origin = $flight->getOriginCode() ?? $flight->getOriginLabel() ?? '';
 			$destination = $flight->getDestinationCode() ?? $flight->getDestinationLabel() ?? '';
 			$route = $origin !== '' || $destination !== '' ? "$origin-$destination" : '';
-			$type = $flight->getAircraftTypeRaw() ?? $flight->getAircraftTypeCode() ?? '';
+			// Model-first, matching the Aircraft column in the flight log so the
+			// markdown dump reads the same as the table it mirrors.
+			$type = $flight->getAircraftModel()
+				?? $flight->getAircraftTypeRaw()
+				?? $flight->getAircraftTypeCode()
+				?? '';
 			$tail = $flight->getRegistration() ?? '';
 
 			$lines[] = sprintf(
@@ -75,6 +80,8 @@ class ExportService {
 				'flightNumber' => $flight->getFlightNumber(),
 				'aircraftTypeCode' => $flight->getAircraftTypeCode(),
 				'aircraftTypeRaw' => $flight->getAircraftTypeRaw(),
+				'aircraftManufacturer' => $flight->getAircraftManufacturer(),
+				'aircraftModel' => $flight->getAircraftModel(),
 				'registration' => $flight->getRegistration(),
 				'cabinClass' => $flight->getCabinClass(),
 				'seat' => $flight->getSeat(),

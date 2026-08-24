@@ -17,6 +17,8 @@ namespace OCA\FlightJournal;
  *     flightNumber: ?string,
  *     aircraftTypeCode: ?string,
  *     aircraftTypeRaw: ?string,
+ *     aircraftManufacturer: ?string,
+ *     aircraftModel: ?string,
  *     registration: ?string,
  *     cabinClass: ?string,
  *     seat: ?string,

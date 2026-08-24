@@ -6,6 +6,8 @@ namespace OCA\FlightJournal\Tests\Unit\Service;
 
 use OCA\FlightJournal\Db\Flight;
 use OCA\FlightJournal\Db\FlightMapper;
+use OCA\FlightJournal\Service\AircraftMatch;
+use OCA\FlightJournal\Service\AircraftReconciliationService;
 use OCA\FlightJournal\Service\AirportMatch;
 use OCA\FlightJournal\Service\AirportReconciliationService;
 use OCA\FlightJournal\Service\FlightService;
@@ -20,6 +22,7 @@ class FlightServiceTest extends TestCase {
 	private FlightMapper&MockObject $mapper;
 	private ITimeFactory&MockObject $time;
 	private AirportReconciliationService&MockObject $reconciler;
+	private AircraftReconciliationService&MockObject $aircraftReconciler;
 	private FlightService $service;
 
 	protected function setUp(): void {
@@ -28,7 +31,10 @@ class FlightServiceTest extends TestCase {
 		$this->time = $this->createMock(ITimeFactory::class);
 		$this->time->method('getTime')->willReturn(1700000000);
 		$this->reconciler = $this->createMock(AirportReconciliationService::class);
-		$this->service = new FlightService($this->mapper, $this->time, $this->reconciler);
+		$this->aircraftReconciler = $this->createMock(AircraftReconciliationService::class);
+		$this->service = new FlightService(
+			$this->mapper, $this->time, $this->reconciler, $this->aircraftReconciler,
+		);
 	}
 
 	private function validData(array $overrides = []): array {
@@ -710,5 +716,274 @@ class FlightServiceTest extends TestCase {
 
 		$this->assertSame('DUB', $flight->getOriginCode(), 'ICAO code canonicalised to IATA');
 		$this->assertSame(1, $result['updated']);
+	}
+
+	// ---- Aircraft type reconciliation ----------------------------------------
+
+	public function testCreateResolvesAircraftAndKeepsTheVerbatimText(): void {
+		$this->mapper->method('maxDaySeqForDate')->willReturn(0);
+		$this->mapper->method('insert')->willReturnArgument(0);
+		$this->aircraftReconciler->method('resolve')
+			->with('B738-8 MAX')
+			->willReturn(new AircraftMatch('B38M', 'BOEING', '737-8'));
+
+		$flight = $this->service->create('alice', $this->validData(['aircraftTypeRaw' => 'B738-8 MAX']));
+
+		$this->assertSame('B38M', $flight->getAircraftTypeCode());
+		$this->assertSame('BOEING', $flight->getAircraftManufacturer());
+		$this->assertSame('737-8', $flight->getAircraftModel());
+		// Unlike an airport label, the user's own text is never overwritten.
+		$this->assertSame('B738-8 MAX', $flight->getAircraftTypeRaw());
+	}
+
+	public function testCreateLeavesAircraftColumnsNullWhenUnresolved(): void {
+		$this->mapper->method('maxDaySeqForDate')->willReturn(0);
+		$this->mapper->method('insert')->willReturnArgument(0);
+		$this->aircraftReconciler->method('resolve')->willReturn(null);
+
+		$flight = $this->service->create('alice', $this->validData(['aircraftTypeRaw' => 'something odd']));
+
+		$this->assertNull($flight->getAircraftTypeCode());
+		$this->assertNull($flight->getAircraftModel());
+		$this->assertSame('something odd', $flight->getAircraftTypeRaw(), 'raw text still recorded');
+	}
+
+	/**
+	 * The aircraft mirror of testUpdatePreservesUnchangedEndpointWithUnresolvableLabel:
+	 * editing an unrelated field must not re-resolve — and so must not clear — a
+	 * type whose raw text does not itself resolve.
+	 */
+	public function testUpdatePreservesResolvedAircraftWhenRawTextUnchanged(): void {
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-05-01');
+		$existing->setAircraftTypeRaw('B738-8 MAX');
+		$existing->setAircraftTypeCode('B38M');
+		$existing->setAircraftManufacturer('BOEING');
+		$existing->setAircraftModel('737-8');
+
+		$this->mapper->method('findForUser')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->expects($this->never())->method('resolve');
+
+		$result = $this->service->update(7, 'alice', $this->validData([
+			'aircraftTypeRaw' => 'B738-8 MAX',
+			'seat' => '4A',
+		]));
+
+		$this->assertSame('B38M', $result->getAircraftTypeCode());
+		$this->assertSame('737-8', $result->getAircraftModel());
+		$this->assertSame('4A', $result->getSeat());
+	}
+
+	public function testUpdateReResolvesAnEditedAircraftType(): void {
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-05-01');
+		$existing->setAircraftTypeRaw('B738');
+		$existing->setAircraftTypeCode('B738');
+		$existing->setAircraftModel('737-800');
+
+		$this->mapper->method('findForUser')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->method('resolve')
+			->with('B77W')
+			->willReturn(new AircraftMatch('B77W', 'BOEING', '777-300ER'));
+
+		$result = $this->service->update(7, 'alice', $this->validData(['aircraftTypeRaw' => 'B77W']));
+
+		$this->assertSame('B77W', $result->getAircraftTypeCode());
+		$this->assertSame('777-300ER', $result->getAircraftModel());
+	}
+
+	public function testUpdateClearsStaleAircraftCodeWhenNewTextDoesNotResolve(): void {
+		$existing = new Flight();
+		$existing->setUserId('alice');
+		$existing->setFlightDate('2026-05-01');
+		$existing->setAircraftTypeRaw('B738');
+		$existing->setAircraftTypeCode('B738');
+		$existing->setAircraftModel('737-800');
+
+		$this->mapper->method('findForUser')->willReturn($existing);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->method('resolve')->willReturn(null);
+
+		$result = $this->service->update(7, 'alice', $this->validData(['aircraftTypeRaw' => 'mystery jet']));
+
+		$this->assertNull($result->getAircraftTypeCode(), 'stale code cleared for an edited value');
+		$this->assertNull($result->getAircraftModel());
+		$this->assertSame('mystery jet', $result->getAircraftTypeRaw());
+	}
+
+	public function testReconcileAircraftResolvesFlightsWithNoCodeYet(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('B738');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->method('resolve')
+			->willReturn(new AircraftMatch('B738', 'BOEING', '737-800'));
+
+		$result = $this->service->reconcileAircraftAll('alice', true);
+
+		$this->assertSame('B738', $flight->getAircraftTypeCode());
+		$this->assertSame('737-800', $flight->getAircraftModel());
+		$this->assertSame(['flights' => 1, 'updated' => 1, 'matched' => 1, 'unmatched' => 0], $result);
+	}
+
+	public function testReconcileAircraftOnlyMissingSkipsFlightsWithACode(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('B738');
+		$flight->setAircraftTypeCode('B738');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->expects($this->never())->method('update');
+		$this->aircraftReconciler->expects($this->never())->method('resolveDesignator');
+
+		$result = $this->service->reconcileAircraftAll('alice', true);
+
+		$this->assertSame(0, $result['updated']);
+	}
+
+	/**
+	 * Scope 'all' is a refresh, not a re-guess: a coded flight is resolved from
+	 * its designator, never from its raw text.
+	 */
+	public function testReconcileAircraftScopeAllRefreshesFromDesignatorNotRawText(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('the big Boeing');
+		$flight->setAircraftTypeCode('B77W');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->expects($this->never())->method('resolve');
+		$this->aircraftReconciler->method('resolveDesignator')
+			->with('B77W')
+			->willReturn(new AircraftMatch('B77W', 'BOEING', '777-300ER'));
+
+		$this->service->reconcileAircraftAll('alice', false);
+
+		$this->assertSame('777-300ER', $flight->getAircraftModel());
+		$this->assertSame('the big Boeing', $flight->getAircraftTypeRaw());
+	}
+
+	public function testReconcileAircraftPreservesCodeWhenNoReferenceDataLoaded(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('B738');
+		$flight->setAircraftTypeCode('B738');
+		$flight->setAircraftModel('737-800');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->expects($this->never())->method('update');
+		$this->aircraftReconciler->method('resolveDesignator')->willReturn(null);
+
+		$result = $this->service->reconcileAircraftAll('alice', false);
+
+		$this->assertSame('B738', $flight->getAircraftTypeCode(), 'a valid code is never cleared');
+		$this->assertSame('737-800', $flight->getAircraftModel());
+		$this->assertSame(1, $result['unmatched']);
+		$this->assertSame(0, $result['updated']);
+	}
+
+	/**
+	 * A stored model that differs from its designator's canonical model can only
+	 * have been chosen explicitly, so a refresh canonicalises the code but leaves
+	 * the choice alone.
+	 */
+	public function testReconcileAircraftPreservesAnExplicitlyChosenModel(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeCode('B789');
+		$flight->setAircraftManufacturer('BOEING');
+		$flight->setAircraftModel('787-9 BBJ');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->expects($this->never())->method('update');
+		$this->aircraftReconciler->method('resolveDesignator')
+			->willReturn(new AircraftMatch('B789', 'BOEING', '787-9 Dreamliner'));
+
+		$this->service->reconcileAircraftAll('alice', false);
+
+		$this->assertSame('787-9 BBJ', $flight->getAircraftModel());
+	}
+
+	public function testReconcileAircraftPassesIgnorePunctuationToTheResolver(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('A320neo');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->expects($this->once())
+			->method('resolve')
+			->with('A320neo', true)
+			->willReturn(new AircraftMatch('A20N', 'AIRBUS', 'A-320neo'));
+
+		$this->service->reconcileAircraftAll('alice', true, true);
+
+		$this->assertSame('A-320neo', $flight->getAircraftModel());
+	}
+
+	public function testReconcileAircraftDefaultsToStrictMatching(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('A320neo');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->aircraftReconciler->expects($this->once())
+			->method('resolve')
+			->with('A320neo', false)
+			->willReturn(null);
+
+		$this->service->reconcileAircraftAll('alice', true);
+
+		$this->assertNull($flight->getAircraftTypeCode());
+	}
+
+	/**
+	 * The option widens the text tier only — a flight that already has a
+	 * designator is still refreshed from that designator.
+	 */
+	public function testIgnorePunctuationDoesNotAffectACodedFlight(): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('A320neo');
+		$flight->setAircraftTypeCode('A20N');
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->expects($this->never())->method('resolve');
+		$this->aircraftReconciler->method('resolveDesignator')
+			->willReturn(new AircraftMatch('A20N', 'AIRBUS', 'A-320neo'));
+
+		$this->service->reconcileAircraftAll('alice', false, true);
+
+		$this->assertSame('A-320neo', $flight->getAircraftModel());
+	}
+
+	public function testReconcileAircraftIgnoresFlightsWithNoAircraftRecorded(): void {
+		$flight = new Flight();
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->expects($this->never())->method('update');
+
+		$result = $this->service->reconcileAircraftAll('alice', false);
+
+		// Absent, not unmatched — an empty field is not a failed lookup.
+		$this->assertSame(['flights' => 1, 'updated' => 0, 'matched' => 0, 'unmatched' => 0], $result);
+	}
+
+	public function testRestoreHonoursAnExplicitAircraftTypeFromABackup(): void {
+		$this->mapper->method('maxDaySeqForDate')->willReturn(0);
+		$this->mapper->method('insert')->willReturnArgument(0);
+		// A backup restores verbatim even with no reference data on the instance.
+		$this->aircraftReconciler->expects($this->never())->method('resolve');
+
+		$flight = $this->service->restore('alice', $this->validData([
+			'aircraftTypeRaw' => 'B738-8 MAX',
+			'aircraftTypeCode' => 'B38M',
+			'aircraftManufacturer' => 'BOEING',
+			'aircraftModel' => '737-8',
+		]));
+
+		$this->assertSame('B38M', $flight->getAircraftTypeCode());
+		$this->assertSame('BOEING', $flight->getAircraftManufacturer());
+		$this->assertSame('737-8', $flight->getAircraftModel());
 	}
 }

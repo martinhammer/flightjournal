@@ -29,6 +29,10 @@ use OCP\AppFramework\Db\Entity;
  * @method void setAircraftTypeCode(?string $aircraftTypeCode)
  * @method string|null getAircraftTypeRaw()
  * @method void setAircraftTypeRaw(?string $aircraftTypeRaw)
+ * @method string|null getAircraftManufacturer()
+ * @method void setAircraftManufacturer(?string $aircraftManufacturer)
+ * @method string|null getAircraftModel()
+ * @method void setAircraftModel(?string $aircraftModel)
  * @method string|null getRegistration()
  * @method void setRegistration(?string $registration)
  * @method string|null getCabinClass()
@@ -59,6 +63,15 @@ class Flight extends Entity implements \JsonSerializable {
 	protected ?string $flightNumber = null;
 	protected ?string $aircraftTypeCode = null;
 	protected ?string $aircraftTypeRaw = null;
+	/**
+	 * The reference model this flight resolved to, denormalised onto the row the
+	 * same way airport reconciliation copies the reference airport name into
+	 * origin_label. Stored as the natural key rather than a reference id so it
+	 * survives a reference re-import and stays meaningful in a JSON backup
+	 * restored on another instance.
+	 */
+	protected ?string $aircraftManufacturer = null;
+	protected ?string $aircraftModel = null;
 	protected ?string $registration = null;
 	protected ?string $cabinClass = null;
 	protected ?string $seat = null;
@@ -87,6 +100,8 @@ class Flight extends Entity implements \JsonSerializable {
 	 *     flightNumber: ?string,
 	 *     aircraftTypeCode: ?string,
 	 *     aircraftTypeRaw: ?string,
+	 *     aircraftManufacturer: ?string,
+	 *     aircraftModel: ?string,
 	 *     registration: ?string,
 	 *     cabinClass: ?string,
 	 *     seat: ?string,
@@ -109,6 +124,8 @@ class Flight extends Entity implements \JsonSerializable {
 			'flightNumber' => $this->flightNumber,
 			'aircraftTypeCode' => $this->aircraftTypeCode,
 			'aircraftTypeRaw' => $this->aircraftTypeRaw,
+			'aircraftManufacturer' => $this->aircraftManufacturer,
+			'aircraftModel' => $this->aircraftModel,
 			'registration' => $this->registration,
 			'cabinClass' => $this->cabinClass,
 			'seat' => $this->seat,

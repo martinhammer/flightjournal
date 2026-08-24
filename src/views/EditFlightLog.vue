@@ -58,16 +58,17 @@ async function load() {
 	}
 	Object.assign(form, {
 		flightDate: existing.flightDate,
-		// Codes are server-derived by airport reconciliation; never round-trip
-		// them. Sending a stale code makes the backend skip re-reconciling an
-		// edited label (it honours explicit client codes).
+		// Codes are server-derived by reconciliation; never round-trip them.
+		// Sending a stale code makes the backend skip re-reconciling an edited
+		// value (it honours explicit client codes). This applies to the aircraft
+		// type designator for exactly the same reason as the airport codes.
 		originCode: null,
 		destinationCode: null,
 		originLabel: existing.originLabel,
 		destinationLabel: existing.destinationLabel,
 		airlineCode: existing.airlineCode,
 		flightNumber: existing.flightNumber,
-		aircraftTypeCode: existing.aircraftTypeCode,
+		aircraftTypeCode: null,
 		aircraftTypeRaw: existing.aircraftTypeRaw,
 		registration: existing.registration,
 		cabinClass: existing.cabinClass,

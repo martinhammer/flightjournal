@@ -116,6 +116,7 @@ class ImportService {
 		$stringFields = [
 			'flightDate', 'originCode', 'destinationCode', 'originLabel', 'destinationLabel',
 			'airlineCode', 'flightNumber', 'aircraftTypeCode', 'aircraftTypeRaw',
+			'aircraftManufacturer', 'aircraftModel',
 			'registration', 'cabinClass', 'seat', 'notes',
 		];
 		$input = [];

@@ -11,7 +11,7 @@ import NcTextField from '@nextcloud/vue/components/NcTextField'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import { listAirports } from '../api.ts'
 import { BLANK_FILTER } from '../filters.ts'
-import { CABIN_CLASSES, type Flight } from '../types.ts'
+import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
 
 // The blank sentinel as staged in each editor: cabin values are kept lowercase,
 // airline / aircraft codes uppercase (matching how each set is prefilled and
@@ -81,10 +81,10 @@ const showMultiday = computed(() => hasMultiFlightDays.value && !multidayActive.
 // Distinct airline / aircraft codes derived from the user's own flights —
 // option lists until reference data lands.
 const airlineOptions = computed<string[]>(() => distinctCodes(props.flights.map((f) => f.airlineCode)))
-// Aircraft uses raw-then-code to match the table's display value — many flights
-// only have aircraftTypeRaw populated until canonicalisation lands.
+// Aircraft uses the shared display value so the options offered here are exactly
+// the strings shown in the table's Aircraft column.
 const aircraftOptions = computed<string[]>(() => distinctCodes(
-	props.flights.map((f) => f.aircraftTypeRaw ?? f.aircraftTypeCode),
+	props.flights.map((f) => aircraftDisplay(f)),
 ))
 
 // Filter the options by the current search term (case-insensitive substring).

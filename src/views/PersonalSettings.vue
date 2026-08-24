@@ -46,6 +46,8 @@ const exportingJson = ref(false)
 const deleting = ref(false)
 const reconciling = ref(false)
 const reconcileAllFlights = ref(false)
+const reconcileAllAircraft = ref(false)
+const ignorePunctuation = ref(false)
 
 interface ReconcileResult { flights: number; updated: number; matched: number; unmatched: number }
 
@@ -222,23 +224,46 @@ async function runDeleteAll() {
 	}
 }
 
-async function runReconcile() {
+/**
+ * Both reconcile actions hit the same shape of endpoint and report the same
+ * counters, so they share one runner. The busy flag is shared too: they operate
+ * on the same flights, so running them concurrently has no benefit.
+ *
+ * @param {string} path OCS path of the reconcile endpoint.
+ * @param {boolean} all Whether to re-check flights that already have a match.
+ * @param {string} noun Singular name for what is being matched, used in the toast.
+ * @param {string} nounPlural Plural of `noun`.
+ * @param {string} failure Message shown if the request fails.
+ * @param {object} extra Additional body fields for endpoints with extra options.
+ */
+async function runReconcile(path: string, all: boolean, noun: string, nounPlural: string, failure: string, extra: Record<string, unknown> = {}) {
 	reconciling.value = true
 	try {
 		const res = await axios.post<{ ocs: { data: ReconcileResult } }>(
-			ocsUrl('/api/v1/flights/reconcile'),
-			{ scope: reconcileAllFlights.value ? 'all' : 'missing' },
+			ocsUrl(path),
+			{ scope: all ? 'all' : 'missing', ...extra },
 			ocsConfig,
 		)
 		const { flights, updated, matched, unmatched } = res.data.ocs.data
 		showSuccess(`Checked ${flights} flight${flights === 1 ? '' : 's'}: `
-			+ `${matched} airport${matched === 1 ? '' : 's'} matched, ${unmatched} unmatched, ${updated} updated.`)
+			+ `${matched} ${matched === 1 ? noun : nounPlural} matched, ${unmatched} unmatched, ${updated} updated.`)
 	} catch {
-		showError('Airport reconciliation failed')
+		showError(failure)
 	} finally {
 		reconciling.value = false
 	}
 }
+
+const runReconcileAirports = () => runReconcile(
+	'/api/v1/flights/reconcile', reconcileAllFlights.value,
+	'airport', 'airports', 'Airport reconciliation failed',
+)
+
+const runReconcileAircraft = () => runReconcile(
+	'/api/v1/flights/reconcile-aircraft', reconcileAllAircraft.value,
+	'aircraft type', 'aircraft types', 'Aircraft reconciliation failed',
+	{ ignorePunctuation: ignorePunctuation.value },
+)
 
 async function runExport() {
 	exporting.value = true
@@ -367,8 +392,37 @@ async function runExport() {
 				Re-check all flights (otherwise only flights with no match yet)
 			</NcCheckboxRadioSwitch>
 			<div class="actions">
-				<NcButton variant="secondary" :disabled="reconciling" @click="runReconcile">
+				<NcButton variant="secondary" :disabled="reconciling" @click="runReconcileAirports">
 					Reconcile airports
+				</NcButton>
+			</div>
+
+			<h3>Reconcile aircraft types</h3>
+			<p class="hint">
+				Match the aircraft type you entered against the Aircraft types reference
+				data, filling in the ICAO type designator and the specific model where an
+				exact match is found. Your original text is always kept.
+			</p>
+			<p class="hint">
+				“Ignore punctuation” widens matching to model names differing only in
+				hyphens or spaces, so “A320neo” finds “A-320neo”. It still has to be an
+				exact, unambiguous match without any missing parts.
+			</p>
+			<NcCheckboxRadioSwitch
+				:model-value="ignorePunctuation"
+				type="switch"
+				@update:model-value="ignorePunctuation = $event">
+				Ignore punctuation when matching model names
+			</NcCheckboxRadioSwitch>		
+			<NcCheckboxRadioSwitch
+				:model-value="reconcileAllAircraft"
+				type="switch"
+				@update:model-value="reconcileAllAircraft = $event">
+				Re-check all flights (otherwise only flights with no match yet)
+			</NcCheckboxRadioSwitch>
+			<div class="actions">
+				<NcButton variant="secondary" :disabled="reconciling" @click="runReconcileAircraft">
+					Reconcile aircraft types
 				</NcButton>
 			</div>
 		</NcSettingsSection>

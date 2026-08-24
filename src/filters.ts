@@ -1,5 +1,5 @@
 import type { LocationQuery } from 'vue-router'
-import { CABIN_CLASSES, type Flight } from './types.ts'
+import { CABIN_CLASSES, aircraftDisplay, type Flight } from './types.ts'
 
 /**
  * An active filter derived from the route query, shared by the Flights and Map
@@ -174,10 +174,10 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 	}
 
 	// Aircraft type: same shape as airline. We compare against the table's
-	// display value (raw-then-code) because many flights only have
-	// aircraftTypeRaw populated; the option list in the picker uses the same
-	// fallback so what you see is what you can filter on. The blank sentinel
-	// matches legs with neither raw nor canonical type.
+	// display value (aircraftDisplay) rather than any single column, so what you
+	// see is what you can filter on — a leg reconciled to "737-800" and one still
+	// showing the typed "738" are genuinely different options here. The blank
+	// sentinel matches legs with no aircraft recorded at all.
 	const { values: aircraft, blank: aircraftBlank } = splitBlank(csvParam(query.aircraft))
 	if (aircraft.length > 0 || aircraftBlank) {
 		const aircraftSet = new Set(aircraft)
@@ -188,7 +188,7 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 			label: `Aircraft: ${parts.join(', ')}`,
 			queryKeys: ['aircraft'],
 			matches: (f) => {
-				const display = f.aircraftTypeRaw ?? f.aircraftTypeCode
+				const display = aircraftDisplay(f)
 				return (aircraftBlank && !display) || (display !== null && aircraftSet.has(display.toUpperCase()))
 			},
 		})

@@ -17,7 +17,7 @@ import { showConfirmation, showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
 import FilterPicker from '../components/FilterPicker.vue'
 import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
-import { CABIN_CLASSES, type Flight } from '../types.ts'
+import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
 import Map from 'vue-material-design-icons/Map.vue'
 
 type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
@@ -77,7 +77,7 @@ function sortValue(f: Flight, key: SortKey): string {
 		// Zero-padded so the string sort orders numerically; unknowns sort lowest.
 		return String(f.distanceKm ?? 0).padStart(6, '0')
 	case 'aircraft':
-		return (f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '').toLowerCase()
+		return (aircraftDisplay(f) ?? '').toLowerCase()
 	case 'registration':
 		return (f.registration ?? '').toLowerCase()
 	case 'cabin':
@@ -253,7 +253,7 @@ async function remove(f: Flight) {
 						<td class="numeric">
 							{{ f.distanceKm?.toLocaleString() ?? '' }}
 						</td>
-						<td>{{ f.aircraftTypeRaw ?? f.aircraftTypeCode ?? '' }}</td>
+						<td>{{ aircraftDisplay(f) ?? '' }}</td>
 						<td>{{ f.registration ?? '' }}</td>
 						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
 						<td>{{ f.seat ?? '' }}</td>

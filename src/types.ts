@@ -10,6 +10,8 @@ export interface Flight {
 	flightNumber: string | null
 	aircraftTypeCode: string | null
 	aircraftTypeRaw: string | null
+	aircraftManufacturer: string | null
+	aircraftModel: string | null
 	registration: string | null
 	cabinClass: string | null
 	seat: string | null
@@ -19,7 +21,28 @@ export interface Flight {
 	updatedAt: number
 }
 
-export type FlightInput = Omit<Flight, 'id' | 'daySeq' | 'distanceKm' | 'createdAt' | 'updatedAt'>
+/**
+ * The aircraft manufacturer/model are server-derived by reconciliation, so the
+ * editor never submits them — the same reason distanceKm is excluded. They
+ * become part of the input only once the Edit view can override the resolved
+ * model.
+ */
+export type FlightInput = Omit<
+	Flight,
+	'id' | 'daySeq' | 'distanceKm' | 'createdAt' | 'updatedAt' | 'aircraftManufacturer' | 'aircraftModel'
+>
+
+/**
+ * What the Aircraft column shows, in priority order: the reconciled reference
+ * model, then the user's own text, then the bare designator. Model-first so the
+ * resolved (and later, user-chosen) model is what the log actually displays.
+ * Shared so the table, its sort key and the filters never disagree.
+ *
+ * @param f The flight to describe.
+ */
+export function aircraftDisplay(f: Pick<Flight, 'aircraftModel' | 'aircraftTypeRaw' | 'aircraftTypeCode'>): string | null {
+	return f.aircraftModel ?? f.aircraftTypeRaw ?? f.aircraftTypeCode
+}
 
 export interface Airport {
 	id: number

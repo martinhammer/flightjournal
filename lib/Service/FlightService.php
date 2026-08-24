@@ -17,6 +17,7 @@ class FlightService {
 		private FlightMapper $mapper,
 		private ITimeFactory $time,
 		private AirportReconciliationService $reconciler,
+		private AircraftReconciliationService $aircraftReconciler,
 	) {
 	}
 
@@ -104,8 +105,12 @@ class FlightService {
 			$data, 'originLabel', 'originCode', $flight->getOriginLabel(), $flight->getOriginCode());
 		[$dLabel, $dCode, $dLat, $dLon, $dKept] = $this->resolveEndpointForUpdate(
 			$data, 'destinationLabel', 'destinationCode', $flight->getDestinationLabel(), $flight->getDestinationCode());
+		// Same preserve-unless-edited rule for the aircraft type; resolved against
+		// the existing flight before anything is overwritten.
+		$aircraft = $this->resolveAircraftForUpdate($data, $flight);
 
 		$this->applyScalars($flight, $data);
+		$this->applyAircraft($flight, $aircraft);
 		$flight->setOriginLabel($oLabel);
 		$flight->setOriginCode($oCode);
 		$flight->setDestinationLabel($dLabel);
@@ -249,6 +254,95 @@ class FlightService {
 		];
 	}
 
+	/**
+	 * Re-run aircraft type reconciliation across the user's flights.
+	 *
+	 * Follows the same hybrid as reconcileAll: a flight that already has a
+	 * designator is refreshed *from that designator* (a failed lookup leaves it
+	 * untouched, never clearing a valid code), while one without a code is
+	 * resolved from its raw text as on create. So 'all' scope canonicalises and
+	 * fills in reference models but never destroys a code because the raw text
+	 * stopped resolving, and is a no-op on an instance with no reference data.
+	 *
+	 * A stored model that differs from its designator's canonical model can only
+	 * have come from an explicit choice (a restored backup today; the Edit-flight
+	 * dropdown later), so it is treated as pinned and preserved while the code
+	 * itself is still canonicalised.
+	 *
+	 * $ignorePunctuation widens only the text tier (see AircraftModelKey); it has
+	 * no effect on a flight refreshed from an existing designator.
+	 *
+	 * @return array{flights: int, updated: int, matched: int, unmatched: int}
+	 */
+	public function reconcileAircraftAll(string $userId, bool $onlyMissing, bool $ignorePunctuation = false): array {
+		$flights = $this->mapper->findAllForUser($userId);
+		$updated = 0;
+		$matched = 0;
+		$unmatched = 0;
+
+		foreach ($flights as $flight) {
+			$code = $flight->getAircraftTypeCode();
+			$raw = $flight->getAircraftTypeRaw();
+			if ($code === null && $raw === null) {
+				// Nothing recorded for this leg — not a miss, just absent.
+				continue;
+			}
+			if ($onlyMissing && $code !== null) {
+				continue;
+			}
+
+			[$newCode, $newManufacturer, $newModel, $hit] = $this->refreshAircraft(
+				$raw, $code, $flight->getAircraftManufacturer(), $flight->getAircraftModel(),
+				$ignorePunctuation,
+			);
+			$hit ? $matched++ : $unmatched++;
+
+			if ($newCode !== $code
+				|| $newManufacturer !== $flight->getAircraftManufacturer()
+				|| $newModel !== $flight->getAircraftModel()) {
+				$flight->setAircraftTypeCode($newCode);
+				$flight->setAircraftManufacturer($newManufacturer);
+				$flight->setAircraftModel($newModel);
+				$flight->setUpdatedAt($this->time->getTime());
+				$this->mapper->update($flight);
+				$updated++;
+			}
+		}
+
+		return [
+			'flights' => count($flights),
+			'updated' => $updated,
+			'matched' => $matched,
+			'unmatched' => $unmatched,
+		];
+	}
+
+	/**
+	 * Refresh one flight's aircraft columns during a bulk recheck.
+	 *
+	 * @return array{0: ?string, 1: ?string, 2: ?string, 3: bool} [code, manufacturer, model, hit]
+	 */
+	private function refreshAircraft(?string $raw, ?string $code, ?string $manufacturer, ?string $model, bool $ignorePunctuation = false): array {
+		if ($code !== null) {
+			$match = $this->aircraftReconciler->resolveDesignator($code);
+			if ($match === null) {
+				// Unknown designator, or no reference data loaded — the code is
+				// authoritative once set, so leave it exactly as it is.
+				return [$code, $manufacturer, $model, false];
+			}
+			$pinned = $model !== null && $match->model !== null && $model !== $match->model;
+			return $pinned
+				? [$match->code, $manufacturer, $model, true]
+				: [$match->code, $match->manufacturer, $match->model, true];
+		}
+
+		$match = $this->aircraftReconciler->resolve($raw, $ignorePunctuation);
+		if ($match === null) {
+			return [null, null, null, false];
+		}
+		return [$match->code, $match->manufacturer, $match->model, true];
+	}
+
 	private function validate(array $data): void {
 		$date = $this->str($data, 'flightDate');
 		if ($date === null) {
@@ -283,19 +377,33 @@ class FlightService {
 		$flight->setDestinationLabel($destinationLabel);
 		$flight->setDestinationCode($destinationCode);
 		$flight->setDistanceKm($this->distanceKm($originLat, $originLon, $destLat, $destLon));
+
+		$this->applyAircraft($flight, $this->resolveAircraft($data));
 	}
 
 	/**
-	 * Apply every non-endpoint field (date plus the free-text/metadata columns).
-	 * Split out so update() can refresh these without re-running the airport
-	 * resolution that applyData() does for origin/destination.
+	 * Write the four aircraft columns from a resolved [raw, code, manufacturer,
+	 * model] tuple.
+	 *
+	 * @param array{0: ?string, 1: ?string, 2: ?string, 3: ?string} $resolved
+	 */
+	private function applyAircraft(Flight $flight, array $resolved): void {
+		[$raw, $code, $manufacturer, $model] = $resolved;
+		$flight->setAircraftTypeRaw($raw);
+		$flight->setAircraftTypeCode($code);
+		$flight->setAircraftManufacturer($manufacturer);
+		$flight->setAircraftModel($model);
+	}
+
+	/**
+	 * Apply every non-reconciled field (date plus the free-text/metadata columns).
+	 * Split out so update() can refresh these without re-running the airport or
+	 * aircraft resolution that applyData() does.
 	 */
 	private function applyScalars(Flight $flight, array $data): void {
 		$flight->setFlightDate((string)$this->str($data, 'flightDate'));
 		$flight->setAirlineCode($this->upper($this->str($data, 'airlineCode')));
 		$flight->setFlightNumber($this->str($data, 'flightNumber'));
-		$flight->setAircraftTypeCode($this->upper($this->str($data, 'aircraftTypeCode')));
-		$flight->setAircraftTypeRaw($this->str($data, 'aircraftTypeRaw'));
 		$flight->setRegistration($this->str($data, 'registration'));
 		$flight->setCabinClass($this->str($data, 'cabinClass'));
 		$flight->setSeat($this->str($data, 'seat'));
@@ -360,6 +468,72 @@ class FlightService {
 
 		[$newLabel, $code, $lat, $lon] = $this->resolveEndpoint($data, $labelKey, $codeKey);
 		return [$newLabel, $code, $lat, $lon, false];
+	}
+
+	/**
+	 * Determine the stored aircraft columns from submitted data.
+	 *
+	 * The verbatim `aircraftTypeRaw` is *always* preserved — unlike an airport
+	 * label, which is overwritten with the reference name on a match. The
+	 * resolved model lands in its own columns alongside it.
+	 *
+	 * An explicit client-supplied code is honoured as-is together with any
+	 * manufacturer/model sent with it, which is how a JSON backup restores its
+	 * recorded type verbatim on an instance with no reference data. The SPA never
+	 * sends a code, so in practice codes always come from the resolver.
+	 *
+	 * @param array<array-key, mixed> $data
+	 * @return array{0: ?string, 1: ?string, 2: ?string, 3: ?string} [raw, code, manufacturer, model]
+	 */
+	private function resolveAircraft(array $data): array {
+		$raw = $this->str($data, 'aircraftTypeRaw');
+
+		$explicitCode = $this->upper($this->str($data, 'aircraftTypeCode'));
+		if ($explicitCode !== null) {
+			return [
+				$raw,
+				$explicitCode,
+				$this->str($data, 'aircraftManufacturer'),
+				$this->str($data, 'aircraftModel'),
+			];
+		}
+
+		$match = $this->aircraftReconciler->resolve($raw);
+		if ($match === null) {
+			return [$raw, null, null, null];
+		}
+		return [$raw, $match->code, $match->manufacturer, $match->model];
+	}
+
+	/**
+	 * Resolve the aircraft columns for an update, preserving a previously
+	 * resolved type whose raw text the user left unchanged.
+	 *
+	 * Same reasoning as resolveEndpointForUpdate: re-resolving on every save would
+	 * let an unrelated edit (the seat, say) clear a valid type when the stored raw
+	 * text is not itself resolvable. Only text the user actually changed is
+	 * reconciled afresh — and an unresolvable new value still clears the stale
+	 * code, as intended.
+	 *
+	 * @param array<array-key, mixed> $data
+	 * @return array{0: ?string, 1: ?string, 2: ?string, 3: ?string} [raw, code, manufacturer, model]
+	 */
+	private function resolveAircraftForUpdate(array $data, Flight $flight): array {
+		if ($this->upper($this->str($data, 'aircraftTypeCode')) !== null) {
+			return $this->resolveAircraft($data);
+		}
+
+		$raw = $this->str($data, 'aircraftTypeRaw');
+		if ($flight->getAircraftTypeCode() !== null && $raw === $flight->getAircraftTypeRaw()) {
+			return [
+				$raw,
+				$flight->getAircraftTypeCode(),
+				$flight->getAircraftManufacturer(),
+				$flight->getAircraftModel(),
+			];
+		}
+
+		return $this->resolveAircraft($data);
 	}
 
 	/**

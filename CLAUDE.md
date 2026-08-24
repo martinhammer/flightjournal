@@ -41,8 +41,10 @@ Standard Nextcloud app shape. Backend in `lib/` (PHP 8.1+, AppFramework, no Doct
 | `destination_label` | varchar(128), nullable | |
 | `airline_code` | varchar(4), nullable | "EY", "EK", "FZ". Split for analytics. |
 | `flight_number` | varchar(8), nullable | Numeric portion only ("449"). |
-| `aircraft_type_code` | varchar(8), nullable | Canonical ICAO type designator (`B77W`, `B789`, `B38M`, `DHC6`). |
+| `aircraft_type_code` | varchar(8), nullable | Canonical ICAO type designator (`B77W`, `B789`, `B38M`, `DHC6`). Set by aircraft reconciliation. |
 | `aircraft_type_raw` | varchar(64), nullable | Verbatim user input ("B738-8 MAX"); preserved even after canonicalization. |
+| `aircraft_manufacturer` | varchar(64), nullable | Reference manufacturer of the resolved model ("BOEING"). Denormalized by reconciliation. |
+| `aircraft_model` | varchar(64), nullable | Reference model of the resolved row ("737-800"). Denormalized by reconciliation; the log's display value. |
 | `registration` | varchar(16), nullable | "A6-ECM". |
 | `cabin_class` | varchar(16), nullable | Enum: `economy`, `premium_economy`, `business`, `first`, `other`. |
 | `seat` | varchar(8), nullable | "12A". |
@@ -93,10 +95,41 @@ Reconciliation runs in four places, all delegating to the one resolver:
 
 **Distance** is computed in the same breath as reconciliation. `AirportMatch` carries the reference `lat`/`lon`, and `FlightService` sets `distance_km` via `Service/GreatCircle::distanceKm()` (pure haversine, whole km) whenever **both** endpoints resolve to coordinates — otherwise `NULL`. It is a deterministic derived field, not provider/cache data, so it lives as a column rather than in `flightjournal_enrichments`. In `create`/`update` (and import) both endpoints are always resolved, so distance tracks the current route. In `reconcileAll` distance is only recomputed when both sides resolve to coordinates in the pass; a side skipped under `missing` scope — or one preserved without a fresh match (a coded side whose code didn't resolve) — leaves the existing distance untouched. Existing flights are backfilled by running recheck-all with scope `all`.
 
+### Aircraft reconciliation
+
+`Service/AircraftReconciliationService::resolve(?string $input): ?AircraftMatch` resolves free-text aircraft input against `flightjournal_aircraft_types`. Exact and tiered, never fuzzy, mirroring the airport resolver:
+
+1. ICAO type designator (case-insensitive) → that designator's **canonical** model.
+2. Model name (case-insensitive; ignored if not unique — 1,034 model strings are shared across manufacturers).
+3. **Opt-in only** (`$ignorePunctuation`): the same model comparison against `model_normalized`, a stored key of just letters and digits (`Service/AircraftModelKey::normalize`, shared by the importer that writes it and the resolver that derives it from user input, so they can't drift). Lets "A320neo" reach DOC 8643's "A-320neo". Still exact and still uniqueness-guarded — normalising collapses only 5,988 → 5,982 distinct model keys, so it adds almost no ambiguity. It deliberately does **not** bridge a missing word: "787-9" still won't reach "787-9 Dreamliner", nor "A350-900" reach "A-350-900 XWB"; those need the designator (B789 / A359).
+
+Tier 3 is exposed as an "Ignore punctuation" switch on the bulk recheck only — it widens what counts as a match, so it isn't applied silently on every save. Measured on the 200-leg demo fixture: **101 → 175 legs** resolve with it on (10 → 17 of 21 distinct strings). It has no effect on a flight refreshed from an existing designator, and because `update` preserves an endpoint whose raw text is unchanged, a later unrelated edit won't quietly undo a match made this way.
+
+No IATA tier: the column exists but the IATA overlay is deliberately not imported yet, so such a tier would always miss.
+
+**Why the reference table is at model grain.** In DOC 8643 a designator maps to many models — 1,377 of 2,688 designators have more than one (B738 is both the 737-800 and the 737-800 BBJ2). Collapsing at import would discard exactly the rows a disambiguation UI needs, so every row is kept and one per designator is flagged `canonical`. `(manufacturer, model)` is the unique key because `model` alone fails to identify a row within its designator for 629 designators.
+
+**Canonical ranking** (`AircraftTypeImportService::pickCanonical`): demote corporate/military derivatives (BBJ, ACJ, Prestige, Lineage, VIP, Elite, Challenger, CC-, UV-, P-72 — only 83 of 7,388 rows) unless *every* candidate is one, then shortest model name, then alphabetical by `(manufacturer, model)`. The final tiebreak is load-bearing, not cosmetic: shortest-model alone ties in 685 of the 1,377 ambiguous designators, so without it the pick would follow file order and could silently flip between imports. Verified: 0 of 2,688 picks change when the input is shuffled. The rule is knowingly imperfect (CRJ9 → "CL-600 Regional Jet CRJ-705" not CRJ-900; E190 → the bare "190") — no automatic rule gets every airliner right, which is why the model is meant to be overridable per flight rather than baked in.
+
+**Divergence from airports on preservation:** an airport label is *overwritten* with the reference name on a match; `aircraft_type_raw` is **always preserved**. The resolved model lands in its own `aircraft_manufacturer` / `aircraft_model` columns alongside it.
+
+**Denormalized, and by natural key.** Reconciliation copies the resolved manufacturer/model onto the flight (as airport reconciliation copies the airport name into `origin_label`), keeping the list endpoint join-free. Stored as the natural key rather than a reference id, because surrogate ids don't survive a re-import and are meaningless in a JSON backup restored on another instance.
+
+Reconciliation runs in the same four places as airports, all through the one resolver:
+
+1. **New flight** — `FlightService::create` resolves `aircraftTypeRaw`.
+2. **Edit flight** — `resolveAircraftForUpdate` re-resolves **only when the raw text actually changed**. Same reasoning as `resolveEndpointForUpdate`: otherwise an unrelated edit (the seat) could clear a valid type whose stored text isn't itself resolvable. An edited value that fails to resolve still clears the stale code, as intended.
+3. **Bulk import** — via `FlightService::create` / `restore`. A backup's explicit code + manufacturer + model are honoured verbatim, so a restore is faithful on an instance with no reference data.
+4. **Recheck-all** — `FlightService::reconcileAircraftAll` + `POST /api/v1/flights/reconcile-aircraft` (scope `missing` | `all`), from Personal settings → Maintenance. Follows the same hybrid: a flight with a designator is refreshed *from that designator* (`resolveDesignator`, which deliberately does **not** fall through to the model-name tier), and a failed lookup leaves it untouched rather than clearing a valid code. A stored model differing from its designator's canonical model is treated as explicitly chosen and preserved while the code is still canonicalised.
+
+The Edit-flight dropdown to override a designator's canonical model is **not built yet**. It needs a public `findByDesignator` on the mapper (the private `byDesignator(…, canonicalOnly: false)` already returns the right rows, canonical first), an endpoint to serve the option list, and `aircraftManufacturer`/`aircraftModel` added back into `FlightInput`. `reconcileAircraftAll` already preserves an explicitly chosen model, so the recheck won't undo the choice once it exists.
+
+**Display is model-first** everywhere: `aircraftDisplay()` in `src/types.ts` returns `aircraftModel ?? aircraftTypeRaw ?? aircraftTypeCode`, shared by the log table cell, its sort key, `filters.ts` matching and the `FilterPicker` option list so they can never disagree. The markdown export mirrors it. Note this is the opposite fallback order from the route column (code-first) — deliberate, so the resolved (and later, user-chosen) model is what the log shows.
+
 ### Reference (instance-wide, no `user_id`)
 
 - `flightjournal_airports` — `iata`, `icao`, `name`, `city`, `state`, `country_iso2`, `lat`, `lon`, `elevation` (feet, integer), `tz`, `source`, `updated_at`.
-- `flightjournal_aircraft_types` — `icao_code` (PK), `iata_code`, `manufacturer`, `model`, `variant`, `engine_type`.
+- `flightjournal_aircraft_types` — **one row per aircraft model, not per designator**: `icao_code` (indexed, *not* unique — it groups models), `manufacturer` + `model` (the unique natural key), `iata_code`, `engine_type`, `engine_count`, `wtc`, `description`, `canonical`, `source`, `updated_at`. See "Aircraft reconciliation" below for why the grain is the model.
 - `flightjournal_airlines` — `iata`, `icao`, `name`, `country_iso2`, `active`.
 
 Shared across all users on the instance. Read-mostly. Populated lazily (autocomplete miss → upstream fetch → upsert) and optionally via scheduled bulk refresh.
@@ -123,7 +156,7 @@ Keyed on `(flight_id, provider, kind)` with a JSON `payload` blob and `fetched_a
 ## Iteration roadmap
 
 1. **Milestone 1 (current):** schema for all tables, flights CRUD, SPA shell with four views, minimal Edit + View screens, personal settings placeholder.
-2. Bundled reference-data seed + autocomplete in editor.
+2. Bundled reference-data seed + autocomplete in editor. *(Reference data landed as admin import for both airports and aircraft types; autocomplete at entry time is still open, as is the Edit-flight dropdown to override a designator's canonical model — see "Aircraft reconciliation".)*
 3. Rich View flight log table (sort/filter/pagination).
 4. Map view (Leaflet).
 5. Analytics view (great-circle distances from cached coordinates; Chart.js).
@@ -157,6 +190,10 @@ Milestone 1 is complete: code implemented and verified end-to-end against NC 31 
 - **Airport browse view**: read-only `views/ViewAirports.vue` (route `/airports`, in the SPA navigation), backed by `Controller/AirportApiController` `GET /api/v1/airports` (paginated, searchable on icao/iata/name/city). Each row has a three-dot menu ("Show flights to / from / to and from `<code>`") that navigates to the Flights view with an airport filter applied.
 - **View filtering** (`src/filters.ts`): the filter model is shared by the Flights and Map views so both interpret the route query identically. `buildFilters(query)` → `ActiveFilter[]` (each with `id`, `label`, `queryKeys`, `matches`); `applyFilters(flights, filters)` applies them (AND). The airport filter uses query keys `airport` + `airportDir` (`to` | `from` | `either`) — **both** are required; `airport` alone is only a Map focus hint, not a filter. The single-flight filter uses query key `flight` (an id) — set by the "View on map" item in each flight's row menu. The route filter uses `routeA` + `routeB` + `routeDir` (`ab` directional | `both`) — set by the arc popup on the Map view. Two toggle filters (set by the `FilterPicker` menu, query value `1`) carry no editor: `unmatched` matches legs missing either airport `_code` (the picker only offers it when the instance has airport reference data — probed once on mount via `listAirports(total)`), and `multiday` matches legs on any date with more than one flight (offered only when such a day exists; its multi-day set is derived from the full list, so it keeps whole days intact — and `ViewFlightLog` therefore still allows within-day reordering when `multiday` is the *only* active filter). Both round-trip to the Map view like every other filter (shared model + the cross-view buttons carry the full query). On the Map the `unmatched` filter simply shows no arcs — partial legs need both endpoints to draw a line — but any *matched* endpoint of those legs still plots as a marker, a deliberate visual cue for spotting data to fix. New filter types extend `buildFilters()`; the chip row and clearing are generic over the shape. Both views show removable `NcChip`s for the active filter plus a reciprocal cross-view button that carries the query across — "View on map" (`ViewFlightLog` → `/map`) and "View in log" (`MapView` → `/flights`).
 - **Airport reconciliation**: `Service/AirportReconciliationService` wired into flight create/update/import plus a recheck-all action in Personal settings. See "Airport reconciliation" above.
+- **Aircraft type reference + reconciliation**: `Db/AircraftType` + `AircraftTypeMapper`, `Service/AircraftTypeImportService` (DOC 8643 CSV, taken verbatim as downloaded from [ColtJD45/icao-aircraft-designator-list](https://github.com/ColtJD45/icao-aircraft-designator-list); header mapped by name, column order free), `Controller/AircraftTypeAdminApiController` exposing `POST /api/v1/admin/aircraft-types/import`, `DELETE /api/v1/admin/aircraft-types`, `GET /api/v1/admin/aircraft-types/count`. Admin-only. Plus `Service/AircraftReconciliationService` + `Migration\Version0004…`. See "Aircraft reconciliation" above.
+  - **Admin settings is now generic over reference tables**: `components/ReferenceDataSection.vue` owns count/import/delete for one table, parameterised by a `basePath` whose three endpoints it derives; `views/AdminSettings.vue` mounts it twice and supplies format guidance via the `instructions` slot. Slot content is compiled in the parent's scope, so the slotted note styling lives in `AdminSettings.vue`, not the child.
+  - **IATA codes are deferred**, not forgotten: `iata_code` exists and stays NULL. The overlay source would be [OpenFlights planes.dat](https://openflights.org/data.php) (~232 designators with both codes, ODbL — attribution + share-alike on the derived database). Adding it needs no migration.
+  - **Reference data is admin-imported, never committed** — same call as the airports JSON, and it also sidesteps redistributing DOC 8643 in a published app package (the MIT label on the scrape covers the packaging, not ICAO's rights in the underlying data).
 - **Within-day ordering**: `day_seq` column + `FlightService::move` + `POST /api/v1/flights/{id}/move`, with up/down chevrons in `ViewFlightLog.vue`. Orders same-day legs without a trip concept or times. See "Within-day ordering" above.
 - **Import / export** (Personal settings → "Import / Export", `views/PersonalSettings.vue`): two formats, both via `POST /api/v1/import` (`dataformat` `markdown`|`json`) and `GET /api/v1/export?dataformat=…`.
   - **Markdown** (legacy): lossy human-friendly table (`Date | Flight | Route | Type | Tail`), pasted into a textarea / downloaded as `.md`. `ImportService::importMarkdownTable` + `ExportService::exportMarkdownTable`.
@@ -183,7 +220,7 @@ Reference data seeding/autocomplete, map, analytics, enrichment, import/export, 
 
 ### PHPUnit (backend)
 
-Unit coverage lives under `tests/unit/Service/` (`FlightServiceTest`, `ImportServiceTest`, `ExportServiceTest`, `GreatCircleTest`). Wired up via `tests/phpunit.xml` and runnable through `composer test:unit` / `make test`. `tests/bootstrap.php` registers a PSR-4 prefix for `nextcloud/ocp` because that package ships stubs without its own autoloader — revisit if the OCP package starts autoloading itself or if tests start needing a real Nextcloud server bootstrap.
+Unit coverage lives under `tests/unit/Service/` (`FlightServiceTest`, `ImportServiceTest`, `ExportServiceTest`, `GreatCircleTest`, `AircraftTypeImportServiceTest`, `AircraftReconciliationServiceTest`). Wired up via `tests/phpunit.xml` and runnable through `composer test:unit` / `make test`. `tests/bootstrap.php` registers a PSR-4 prefix for `nextcloud/ocp` because that package ships stubs without its own autoloader — revisit if the OCP package starts autoloading itself or if tests start needing a real Nextcloud server bootstrap.
 
 Still missing and worth adding once the API surface settles past Milestone 1:
 
@@ -194,4 +231,4 @@ Still missing and worth adding once the API surface settles past Milestone 1:
 
 - **Type-check:** `npm run type-check` (`vue-tsc --noEmit`) is a gate — wired into `make lint`. It catches `@nextcloud/vue` v8→v9 prop/event mismatches. `src/shims-icons.d.ts` declares the `vue-material-design-icons/*.vue` modules (the package ships `.d.vue.ts` files but no `exports` map).
 - **Component tests:** Vitest + `@vue/test-utils` under `tests/frontend/` (`*.spec.ts`), config in `vitest.config.ts`, shared mocks in `tests/frontend/setup.ts`. Run via `npm run test:frontend`, gated through `make test`. `@nextcloud/vue` is inlined (`server.deps.inline`) so Vite handles its CSS side-effect imports.
-- **Add a component test for every new interaction-critical UI path** (form save, search, filter, destructive action). Test the wiring as a user drives it — stub heavy children but emit the real model event / click the real button so a wrong prop or event name fails the test. When mounting a real `@nextcloud/vue` component, mock `vue-router` with `importOriginal` so injected keys (`routerKey`) survive.
+- **Add a component test for every new interaction-critical UI path** (form save, search, filter, destructive action). Test the wiring as a user drives it — stub heavy children but emit the real model event / click the real button so a wrong prop or event name fails the test. When mounting a real `@nextcloud/vue` component, mock `vue-router` with `importOriginal` so injected keys (`routerKey`) survive. `AdminSettings.spec.ts` covers both reference tables through the shared `ReferenceDataSection`; since one component drives both, its assertions are mostly that each instance is aimed at *its own* endpoints — a wrong `basePath` would import aircraft into the airport table or wipe the wrong one.
