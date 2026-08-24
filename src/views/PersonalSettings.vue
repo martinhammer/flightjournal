@@ -413,7 +413,7 @@ async function runExport() {
 				type="switch"
 				@update:model-value="ignorePunctuation = $event">
 				Ignore punctuation when matching model names
-			</NcCheckboxRadioSwitch>		
+			</NcCheckboxRadioSwitch>
 			<NcCheckboxRadioSwitch
 				:model-value="reconcileAllAircraft"
 				type="switch"
