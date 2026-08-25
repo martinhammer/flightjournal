@@ -978,6 +978,10 @@
             "description": "Admin-only endpoints for managing the instance-wide aircraft type reference table, mirroring AirportAdminApiController. Routes intentionally omit #[NoAdminRequired] so the framework restricts them to administrators."
         },
         {
+            "name": "aircraft_type_api",
+            "description": "Read-only aircraft type reference data for any logged-in user, mirroring AirportApiController."
+        },
+        {
             "name": "airport_admin_api",
             "description": "Admin-only endpoints for managing the instance-wide airport reference table. Routes intentionally omit #[NoAdminRequired] so the framework restricts them to administrators."
         },

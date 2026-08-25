@@ -16,6 +16,7 @@ const items = [
 	{ to: '/map', label: 'Map' },
 	{ to: '/analytics', label: 'Analytics' },
 	{ to: '/airports', label: 'Airports' },
+	{ to: '/aircraft-types', label: 'Aircraft types' },
 ]
 
 const addOpen = ref(false)

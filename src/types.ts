@@ -60,6 +60,27 @@ export interface Airport {
 	updatedAt: number
 }
 
+/**
+ * A row of the aircraft reference table — one *model*, not one designator.
+ * `icaoCode` groups the models sharing a designator; `canonical` marks the one
+ * a bare designator resolves to.
+ */
+export interface AircraftType {
+	id: number
+	icaoCode: string
+	iataCode: string | null
+	manufacturer: string | null
+	model: string | null
+	modelNormalized: string | null
+	engineType: string | null
+	engineCount: number | null
+	wtc: string | null
+	description: string | null
+	canonical: boolean
+	source: string | null
+	updatedAt: number
+}
+
 export const CABIN_CLASSES = [
 	{ value: 'economy', label: 'Economy' },
 	{ value: 'premium_economy', label: 'Premium economy' },

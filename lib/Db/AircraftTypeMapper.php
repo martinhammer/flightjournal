@@ -101,9 +101,43 @@ class AircraftTypeMapper extends QBMapper {
 	}
 
 	public function count(): int {
+		return $this->countSearch(null);
+	}
+
+	/**
+	 * A page of aircraft types, grouped by designator with its default model
+	 * first so the variants read as belonging to it.
+	 *
+	 * When $designators is non-null, restrict to those ICAO type designators
+	 * (case-insensitive); an empty list matches nothing.
+	 *
+	 * @param list<string>|null $designators
+	 * @return AircraftType[]
+	 */
+	public function search(?string $q, int $limit, int $offset, ?array $designators = null): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')
+			->from($this->getTableName())
+			->orderBy('icao_code', 'ASC')
+			->addOrderBy('canonical', 'DESC')
+			->addOrderBy('manufacturer', 'ASC')
+			->addOrderBy('model', 'ASC')
+			->setMaxResults($limit)
+			->setFirstResult($offset);
+		$this->applySearch($qb, $q);
+		$this->applyDesignators($qb, $designators);
+		return $this->findEntities($qb);
+	}
+
+	/**
+	 * @param list<string>|null $designators See {@see search()}.
+	 */
+	public function countSearch(?string $q, ?array $designators = null): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select($qb->func()->count('*', 'cnt'))
 			->from($this->getTableName());
+		$this->applySearch($qb, $q);
+		$this->applyDesignators($qb, $designators);
 		$result = $qb->executeQuery();
 		$row = $result->fetch();
 		$result->closeCursor();
@@ -111,6 +145,46 @@ class AircraftTypeMapper extends QBMapper {
 			return 0;
 		}
 		return (int)($row['cnt'] ?? 0);
+	}
+
+	private function applySearch(IQueryBuilder $qb, ?string $q): void {
+		if ($q === null) {
+			return;
+		}
+		$term = trim($q);
+		if ($term === '') {
+			return;
+		}
+		$like = '%' . mb_strtolower($term) . '%';
+		$param = $qb->createNamedParameter($like);
+		$qb->andWhere($qb->expr()->orX(
+			$qb->expr()->like($qb->func()->lower('icao_code'), $param),
+			$qb->expr()->like($qb->func()->lower('iata_code'), $param),
+			$qb->expr()->like($qb->func()->lower('manufacturer'), $param),
+			$qb->expr()->like($qb->func()->lower('model'), $param),
+		));
+	}
+
+	/**
+	 * @param list<string>|null $designators
+	 */
+	private function applyDesignators(IQueryBuilder $qb, ?array $designators): void {
+		if ($designators === null) {
+			return;
+		}
+		if ($designators === []) {
+			// Restricted to an empty set — match nothing.
+			$qb->andWhere($qb->expr()->eq(
+				$qb->createNamedParameter(0, IQueryBuilder::PARAM_INT),
+				$qb->createNamedParameter(1, IQueryBuilder::PARAM_INT),
+			));
+			return;
+		}
+		$lower = array_values(array_unique(array_map('mb_strtolower', $designators)));
+		$qb->andWhere($qb->expr()->in(
+			$qb->func()->lower('icao_code'),
+			$qb->createNamedParameter($lower, IQueryBuilder::PARAM_STR_ARRAY),
+		));
 	}
 
 	/**

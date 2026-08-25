@@ -80,6 +80,38 @@ class FlightMapper extends QBMapper {
 	}
 
 	/**
+	 * Distinct ICAO type designators the user has flown.
+	 *
+	 * The designator is the flight's authoritative link to the reference table
+	 * (aircraft_manufacturer/aircraft_model are a display denormalisation), so
+	 * this is what the Aircraft types view restricts on. One consequence: a
+	 * designator covering several models surfaces all of them, including
+	 * siblings the user has not flown.
+	 *
+	 * @return list<string>
+	 */
+	public function findFlownAircraftCodes(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->selectDistinct('aircraft_type_code')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->isNotNull('aircraft_type_code'));
+		$result = $qb->executeQuery();
+		$codes = [];
+		while (true) {
+			$row = $result->fetch();
+			if (!is_array($row)) {
+				break;
+			}
+			if (is_string($row['aircraft_type_code']) && $row['aircraft_type_code'] !== '') {
+				$codes[$row['aircraft_type_code']] = true;
+			}
+		}
+		$result->closeCursor();
+		return array_keys($codes);
+	}
+
+	/**
 	 * Distinct origin/destination codes across all of a user's flights.
 	 *
 	 * @return list<string>

@@ -1,6 +1,6 @@
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
-import type { Airport, Flight, FlightInput } from './types.ts'
+import type { AircraftType, Airport, Flight, FlightInput } from './types.ts'
 
 const url = (path: string) => {
 	const base = generateOcsUrl('apps/flightjournal' + path)
@@ -58,6 +58,23 @@ export async function listAirports(q: string, limit: number, offset: number, flo
 	params.set('offset', String(offset))
 	params.set('flownOnly', flownOnly ? 'true' : 'false')
 	const res = await axios.get<OcsResponse<AirportPage>>(url(`/api/v1/airports?${params.toString()}`), config)
+	return res.data.ocs.data
+}
+
+export interface AircraftTypePage {
+	items: AircraftType[]
+	total: number
+	limit: number
+	offset: number
+}
+
+export async function listAircraftTypes(q: string, limit: number, offset: number, flownOnly = true): Promise<AircraftTypePage> {
+	const params = new URLSearchParams()
+	if (q.trim()) params.set('q', q.trim())
+	params.set('limit', String(limit))
+	params.set('offset', String(offset))
+	params.set('flownOnly', flownOnly ? 'true' : 'false')
+	const res = await axios.get<OcsResponse<AircraftTypePage>>(url(`/api/v1/aircraft-types?${params.toString()}`), config)
 	return res.data.ocs.data
 }
 

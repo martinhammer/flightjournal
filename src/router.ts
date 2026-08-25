@@ -3,6 +3,7 @@ import EditFlightLog from './views/EditFlightLog.vue'
 import ViewFlightLog from './views/ViewFlightLog.vue'
 import AnalyticsView from './views/AnalyticsView.vue'
 import ViewAirports from './views/ViewAirports.vue'
+import ViewAircraftTypes from './views/ViewAircraftTypes.vue'
 
 // Lazy-loaded: pulls in Leaflet + the bundled basemap, kept out of the main chunk.
 const MapView = () => import('./views/MapView.vue')
@@ -14,6 +15,7 @@ const routes: RouteRecordRaw[] = [
 	{ path: '/map', name: 'map', component: MapView },
 	{ path: '/analytics', name: 'analytics', component: AnalyticsView },
 	{ path: '/airports', name: 'airports', component: ViewAirports },
+	{ path: '/aircraft-types', name: 'aircraft-types', component: ViewAircraftTypes },
 ]
 
 export const router = createRouter({
