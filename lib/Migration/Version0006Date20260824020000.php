@@ -14,8 +14,8 @@ use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
 /**
- * Adds the punctuation-insensitive lookup key backing the "Ignore punctuation"
- * option on the aircraft recheck.
+ * Adds the punctuation-insensitive lookup key used by the third aircraft
+ * reconciliation tier, so "A320neo" reaches DOC 8643's "A-320neo".
  *
  * Stored as a column rather than computed in SQL so the lookup is indexed and
  * portable — stripping separators with nested REPLACE() would work across the

@@ -47,7 +47,6 @@ const deleting = ref(false)
 const reconciling = ref(false)
 const reconcileAllFlights = ref(false)
 const reconcileAllAircraft = ref(false)
-const ignorePunctuation = ref(false)
 
 interface ReconcileResult { flights: number; updated: number; matched: number; unmatched: number }
 
@@ -234,14 +233,13 @@ async function runDeleteAll() {
  * @param {string} noun Singular name for what is being matched, used in the toast.
  * @param {string} nounPlural Plural of `noun`.
  * @param {string} failure Message shown if the request fails.
- * @param {object} extra Additional body fields for endpoints with extra options.
  */
-async function runReconcile(path: string, all: boolean, noun: string, nounPlural: string, failure: string, extra: Record<string, unknown> = {}) {
+async function runReconcile(path: string, all: boolean, noun: string, nounPlural: string, failure: string) {
 	reconciling.value = true
 	try {
 		const res = await axios.post<{ ocs: { data: ReconcileResult } }>(
 			ocsUrl(path),
-			{ scope: all ? 'all' : 'missing', ...extra },
+			{ scope: all ? 'all' : 'missing' },
 			ocsConfig,
 		)
 		const { flights, updated, matched, unmatched } = res.data.ocs.data
@@ -262,7 +260,6 @@ const runReconcileAirports = () => runReconcile(
 const runReconcileAircraft = () => runReconcile(
 	'/api/v1/flights/reconcile-aircraft', reconcileAllAircraft.value,
 	'aircraft type', 'aircraft types', 'Aircraft reconciliation failed',
-	{ ignorePunctuation: ignorePunctuation.value },
 )
 
 async function runExport() {
@@ -401,19 +398,8 @@ async function runExport() {
 			<p class="hint">
 				Match the aircraft type you entered against the Aircraft types reference
 				data, filling in the ICAO type designator and the specific model where an
-				exact match is found. Your original text is always kept.
+				exact match is found (hyphens and spaces are ignored). Your original text is always kept.
 			</p>
-			<p class="hint">
-				“Ignore punctuation” widens matching to model names differing only in
-				hyphens or spaces, so “A320neo” finds “A-320neo”. It still has to be an
-				exact, unambiguous match without any missing parts.
-			</p>
-			<NcCheckboxRadioSwitch
-				:model-value="ignorePunctuation"
-				type="switch"
-				@update:model-value="ignorePunctuation = $event">
-				Ignore punctuation when matching model names
-			</NcCheckboxRadioSwitch>
 			<NcCheckboxRadioSwitch
 				:model-value="reconcileAllAircraft"
 				type="switch"

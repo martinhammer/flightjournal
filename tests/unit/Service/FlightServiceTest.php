@@ -906,57 +906,6 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame('787-9 BBJ', $flight->getAircraftModel());
 	}
 
-	public function testReconcileAircraftPassesIgnorePunctuationToTheResolver(): void {
-		$flight = new Flight();
-		$flight->setAircraftTypeRaw('A320neo');
-
-		$this->mapper->method('findAllForUser')->willReturn([$flight]);
-		$this->mapper->method('update')->willReturnArgument(0);
-		$this->aircraftReconciler->expects($this->once())
-			->method('resolve')
-			->with('A320neo', true)
-			->willReturn(new AircraftMatch('A20N', 'AIRBUS', 'A-320neo'));
-
-		$this->service->reconcileAircraftAll('alice', true, true);
-
-		$this->assertSame('A-320neo', $flight->getAircraftModel());
-	}
-
-	public function testReconcileAircraftDefaultsToStrictMatching(): void {
-		$flight = new Flight();
-		$flight->setAircraftTypeRaw('A320neo');
-
-		$this->mapper->method('findAllForUser')->willReturn([$flight]);
-		$this->aircraftReconciler->expects($this->once())
-			->method('resolve')
-			->with('A320neo', false)
-			->willReturn(null);
-
-		$this->service->reconcileAircraftAll('alice', true);
-
-		$this->assertNull($flight->getAircraftTypeCode());
-	}
-
-	/**
-	 * The option widens the text tier only — a flight that already has a
-	 * designator is still refreshed from that designator.
-	 */
-	public function testIgnorePunctuationDoesNotAffectACodedFlight(): void {
-		$flight = new Flight();
-		$flight->setAircraftTypeRaw('A320neo');
-		$flight->setAircraftTypeCode('A20N');
-
-		$this->mapper->method('findAllForUser')->willReturn([$flight]);
-		$this->mapper->method('update')->willReturnArgument(0);
-		$this->aircraftReconciler->expects($this->never())->method('resolve');
-		$this->aircraftReconciler->method('resolveDesignator')
-			->willReturn(new AircraftMatch('A20N', 'AIRBUS', 'A-320neo'));
-
-		$this->service->reconcileAircraftAll('alice', false, true);
-
-		$this->assertSame('A-320neo', $flight->getAircraftModel());
-	}
-
 	public function testReconcileAircraftIgnoresFlightsWithNoAircraftRecorded(): void {
 		$flight = new Flight();
 

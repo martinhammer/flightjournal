@@ -3238,11 +3238,6 @@
                                         "type": "string",
                                         "default": "missing",
                                         "description": "'missing' to only touch flights without a type code, 'all' to refresh every flight"
-                                    },
-                                    "ignorePunctuation": {
-                                        "type": "boolean",
-                                        "default": false,
-                                        "description": "Also match model names ignoring hyphens and spaces"
                                     }
                                 }
                             }

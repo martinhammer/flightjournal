@@ -107,15 +107,7 @@ class AircraftReconciliationServiceTest extends TestCase {
 		$this->assertSame('787-9 Dreamliner', $match->model);
 	}
 
-	// ---- Punctuation-insensitive tier (opt-in) -------------------------------
-
-	public function testPunctuationTierIsOffByDefault(): void {
-		$this->mapper->method('findCanonicalByDesignator')->willReturn(null);
-		$this->mapper->method('findOneByModelName')->willReturn(null);
-		$this->mapper->expects($this->never())->method('findOneByNormalizedModel');
-
-		$this->assertNull($this->service->resolve('A320neo'));
-	}
+	// ---- Punctuation-insensitive tier ----------------------------------------
 
 	public function testPunctuationTierMatchesASeparatorVariant(): void {
 		$this->mapper->method('findCanonicalByDesignator')->willReturn(null);
@@ -124,7 +116,7 @@ class AircraftReconciliationServiceTest extends TestCase {
 			->with('a320neo')
 			->willReturn($this->row('A20N', 'AIRBUS', 'A-320neo'));
 
-		$match = $this->service->resolve('A320neo', true);
+		$match = $this->service->resolve('A320neo');
 
 		$this->assertNotNull($match);
 		$this->assertSame('A20N', $match->code);
@@ -132,15 +124,28 @@ class AircraftReconciliationServiceTest extends TestCase {
 	}
 
 	/**
-	 * The strict tiers still win, so enabling the option can never change a
-	 * result that already resolved exactly.
+	 * The property that makes this tier safe to have always on: it is strictly
+	 * additive. Consulted only after both strict tiers miss, so it can never
+	 * change a result that already resolved — only fill in a blank.
 	 */
 	public function testPunctuationTierIsOnlyConsultedAfterTheStrictTiers(): void {
 		$this->mapper->method('findCanonicalByDesignator')
 			->willReturn($this->row('B738', 'BOEING', '737-800'));
 		$this->mapper->expects($this->never())->method('findOneByNormalizedModel');
 
-		$match = $this->service->resolve('B738', true);
+		$match = $this->service->resolve('B738');
+
+		$this->assertNotNull($match);
+		$this->assertSame('737-800', $match->model);
+	}
+
+	public function testPunctuationTierIsNotConsultedAfterAnExactModelNameHit(): void {
+		$this->mapper->method('findCanonicalByDesignator')->willReturn(null);
+		$this->mapper->method('findOneByModelName')
+			->willReturn($this->row('B738', 'BOEING', '737-800'));
+		$this->mapper->expects($this->never())->method('findOneByNormalizedModel');
+
+		$match = $this->service->resolve('737-800');
 
 		$this->assertNotNull($match);
 		$this->assertSame('737-800', $match->model);
@@ -149,10 +154,11 @@ class AircraftReconciliationServiceTest extends TestCase {
 	public function testPunctuationTierStillRequiresAnUnambiguousMatch(): void {
 		$this->mapper->method('findCanonicalByDesignator')->willReturn(null);
 		$this->mapper->method('findOneByModelName')->willReturn(null);
-		// The mapper returns null for an ambiguous key, exactly as the exact tier does.
+		// The mapper returns null for an ambiguous key, exactly as the exact tier
+		// does — so normalising can only ever fail to match, never mis-match.
 		$this->mapper->method('findOneByNormalizedModel')->willReturn(null);
 
-		$this->assertNull($this->service->resolve('SeaStar', true));
+		$this->assertNull($this->service->resolve('SeaStar'));
 	}
 
 	public function testBlankReferenceFieldsBecomeNull(): void {

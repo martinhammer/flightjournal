@@ -269,12 +269,9 @@ class FlightService {
 	 * dropdown later), so it is treated as pinned and preserved while the code
 	 * itself is still canonicalised.
 	 *
-	 * $ignorePunctuation widens only the text tier (see AircraftModelKey); it has
-	 * no effect on a flight refreshed from an existing designator.
-	 *
 	 * @return array{flights: int, updated: int, matched: int, unmatched: int}
 	 */
-	public function reconcileAircraftAll(string $userId, bool $onlyMissing, bool $ignorePunctuation = false): array {
+	public function reconcileAircraftAll(string $userId, bool $onlyMissing): array {
 		$flights = $this->mapper->findAllForUser($userId);
 		$updated = 0;
 		$matched = 0;
@@ -293,7 +290,6 @@ class FlightService {
 
 			[$newCode, $newManufacturer, $newModel, $hit] = $this->refreshAircraft(
 				$raw, $code, $flight->getAircraftManufacturer(), $flight->getAircraftModel(),
-				$ignorePunctuation,
 			);
 			$hit ? $matched++ : $unmatched++;
 
@@ -322,7 +318,7 @@ class FlightService {
 	 *
 	 * @return array{0: ?string, 1: ?string, 2: ?string, 3: bool} [code, manufacturer, model, hit]
 	 */
-	private function refreshAircraft(?string $raw, ?string $code, ?string $manufacturer, ?string $model, bool $ignorePunctuation = false): array {
+	private function refreshAircraft(?string $raw, ?string $code, ?string $manufacturer, ?string $model): array {
 		if ($code !== null) {
 			$match = $this->aircraftReconciler->resolveDesignator($code);
 			if ($match === null) {
@@ -336,7 +332,7 @@ class FlightService {
 				: [$match->code, $match->manufacturer, $match->model, true];
 		}
 
-		$match = $this->aircraftReconciler->resolve($raw, $ignorePunctuation);
+		$match = $this->aircraftReconciler->resolve($raw);
 		if ($match === null) {
 			return [null, null, null, false];
 		}

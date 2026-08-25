@@ -42,7 +42,6 @@ function switchByText(wrapper: ReturnType<typeof mount>, text: string) {
 }
 
 const ALL_FLIGHTS = 'Re-check all flights (otherwise only flights with no match yet)'
-const IGNORE_PUNCT = 'Ignore punctuation when matching model names'
 
 describe('PersonalSettings reconcile actions', () => {
 	beforeEach(() => {
@@ -60,7 +59,7 @@ describe('PersonalSettings reconcile actions', () => {
 
 		const [url, body] = post.mock.calls[0]
 		expect(url).toContain('/api/v1/flights/reconcile-aircraft')
-		expect(body).toEqual({ scope: 'missing', ignorePunctuation: false })
+		expect(body).toEqual({ scope: 'missing' })
 	})
 
 	it('sends the airport reconcile to its own endpoint, without aircraft options', async () => {
@@ -72,15 +71,6 @@ describe('PersonalSettings reconcile actions', () => {
 		expect(url).toContain('/api/v1/flights/reconcile')
 		expect(url).not.toContain('reconcile-aircraft')
 		expect(body).toEqual({ scope: 'missing' })
-	})
-
-	it('carries the ignore-punctuation switch into the request', async () => {
-		const wrapper = mount(PersonalSettings, { global: { stubs } })
-		await switchByText(wrapper, IGNORE_PUNCT).trigger('click')
-		await buttonByText(wrapper, 'Reconcile aircraft types').trigger('click')
-		await flushPromises()
-
-		expect(post.mock.calls[0][1]).toEqual({ scope: 'missing', ignorePunctuation: true })
 	})
 
 	it('keeps the two scope switches independent', async () => {
@@ -95,6 +85,6 @@ describe('PersonalSettings reconcile actions', () => {
 
 		await buttonByText(wrapper, 'Reconcile aircraft types').trigger('click')
 		await flushPromises()
-		expect(post.mock.calls[1][1]).toEqual({ scope: 'all', ignorePunctuation: false })
+		expect(post.mock.calls[1][1]).toEqual({ scope: 'all' })
 	})
 })

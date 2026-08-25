@@ -17,12 +17,17 @@ use OCA\FlightJournal\Db\AircraftTypeMapper;
  *   2. Model name (case-insensitive, must be unambiguous) — "737-800" → that
  *      row. 1,034 model strings are shared by more than one manufacturer, so an
  *      ambiguous name resolves to nothing rather than guessing.
- *   3. Only when $ignorePunctuation is set: the same model comparison with
- *      separators removed, so "A320neo" reaches DOC 8643's "A-320neo". Still
- *      exact and still required to be unambiguous — see Service\AircraftModelKey.
+ *   3. The same model comparison with separators removed, so "A320neo" reaches
+ *      DOC 8643's "A-320neo". Still exact and still required to be unambiguous —
+ *      see Service\AircraftModelKey.
  *
- * Tier 3 is opt-in because it widens what counts as a match; it is offered as a
- * switch on the bulk recheck rather than applied silently on every save.
+ * Tier 3 is strictly additive: it is consulted only after both strict tiers have
+ * returned null, so it can never change a result that already resolved — only
+ * fill in a blank. Its failure mode is a missing match, never a wrong one, since
+ * normalising two models onto the same key makes that key ambiguous and an
+ * ambiguous key resolves to nothing. It was briefly an opt-in switch on the bulk
+ * recheck; that only made the default worse (101 of 200 demo legs resolving
+ * instead of 175) and left saves matching differently from rechecks.
  *
  * There is deliberately no IATA tier: the `iata_code` column exists but the
  * IATA overlay is not imported yet, so such a tier would always miss.
@@ -40,10 +45,8 @@ class AircraftReconciliationService {
 	/**
 	 * Resolve free text to a designator + reference model, or null when there is
 	 * no confident, unambiguous match.
-	 *
-	 * @param bool $ignorePunctuation Enable the separator-tolerant model tier.
 	 */
-	public function resolve(?string $input, bool $ignorePunctuation = false): ?AircraftMatch {
+	public function resolve(?string $input): ?AircraftMatch {
 		if ($input === null) {
 			return null;
 		}
@@ -53,11 +56,8 @@ class AircraftReconciliationService {
 		}
 
 		$row = $this->types->findCanonicalByDesignator($term)
-			?? $this->types->findOneByModelName($term);
-
-		if ($row === null && $ignorePunctuation) {
-			$row = $this->types->findOneByNormalizedModel(AircraftModelKey::normalize($term));
-		}
+			?? $this->types->findOneByModelName($term)
+			?? $this->types->findOneByNormalizedModel(AircraftModelKey::normalize($term));
 
 		return $row === null ? null : $this->toMatch($row);
 	}

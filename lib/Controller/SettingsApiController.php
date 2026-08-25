@@ -116,7 +116,6 @@ class SettingsApiController extends OCSController {
 	 * Re-run aircraft type reconciliation across the current user's flights.
 	 *
 	 * @param string $scope 'missing' to only touch flights without a type code, 'all' to refresh every flight
-	 * @param bool $ignorePunctuation Also match model names ignoring hyphens and spaces
 	 * @return DataResponse<Http::STATUS_OK, array{flights: int, updated: int, matched: int, unmatched: int}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
 	 *
 	 * 200: Reconciliation completed
@@ -124,13 +123,11 @@ class SettingsApiController extends OCSController {
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'POST', url: '/api/v1/flights/reconcile-aircraft')]
-	public function reconcileAircraft(string $scope = 'missing', bool $ignorePunctuation = false): DataResponse {
+	public function reconcileAircraft(string $scope = 'missing'): DataResponse {
 		if ($scope !== 'missing' && $scope !== 'all') {
 			return new DataResponse(['message' => "Unknown scope '$scope'"], Http::STATUS_BAD_REQUEST);
 		}
-		$result = $this->flights->reconcileAircraftAll(
-			$this->getUserId(), $scope === 'missing', $ignorePunctuation,
-		);
+		$result = $this->flights->reconcileAircraftAll($this->getUserId(), $scope === 'missing');
 		return new DataResponse($result);
 	}
 
