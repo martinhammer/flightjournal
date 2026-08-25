@@ -2003,6 +2003,18 @@
                                         "default": null,
                                         "description": "Verbatim aircraft type as entered"
                                     },
+                                    "aircraftManufacturer": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Reference manufacturer of an explicitly chosen model"
+                                    },
+                                    "aircraftModel": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Reference model explicitly chosen by the user"
+                                    },
                                     "registration": {
                                         "type": "string",
                                         "nullable": true,
@@ -2451,6 +2463,18 @@
                                         "nullable": true,
                                         "default": null,
                                         "description": "Verbatim aircraft type as entered"
+                                    },
+                                    "aircraftManufacturer": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Reference manufacturer of an explicitly chosen model"
+                                    },
+                                    "aircraftModel": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "default": null,
+                                        "description": "Reference model explicitly chosen by the user"
                                     },
                                     "registration": {
                                         "type": "string",

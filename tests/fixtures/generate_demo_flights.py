@@ -11,15 +11,20 @@ Characteristics (see the project brief):
 - Mix of short- and long-haul, with connecting, open-jaw and circular routings.
 - Realistic airline / aircraft / registration / cabin distributions.
 - A handful of flights with deliberately invalid airport codes.
+- Aircraft types resolved against the real DOC 8643 reference, plus a few
+  deliberately unresolvable and a few with no aircraft recorded at all.
 
 Deterministic: a fixed RNG seed makes the output reproducible.
 """
 
 import argparse
+import collections
+import csv
 import json
 import math
 import os
 import random
+import re
 import sys
 from datetime import datetime, timezone, date, timedelta
 
@@ -92,11 +97,104 @@ def _default_reference_path():
     return None
 
 
+def _default_aircraft_path():
+    """Look for the DOC 8643 CSV next to this script or in the CWD."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "icao_aircraft_data.csv"), "icao_aircraft_data.csv"):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+# Corporate/military derivative markers — must match the DERIVATIVE_MARKERS
+# pattern in Service/AircraftTypeImportService.php.
+_DERIVATIVE = re.compile(r"\b(BBJ|ACJ|Prestige|Lineage|VIP|Elite|Challenger|CC-|UV-|P-72)", re.I)
+
+
+def _digits(value):
+    return re.sub(r"\D", "", value)
+
+
+def _is_subsequence(needle, haystack):
+    it = iter(haystack)
+    return all(c in it for c in needle)
+
+
+def _narrow(candidates, keep):
+    """Filter, but never to nothing — mirrors AircraftTypeImportService::narrow."""
+    kept = [r for r in candidates if keep(r)]
+    return kept or candidates
+
+
+def _canonical(group):
+    """The model a bare designator resolves to.
+
+    Reimplements AircraftTypeImportService::pickCanonical — digit containment,
+    then derivative demotion, then shortest model, then alphabetical. Keep the
+    two in step, as with haversine_km and Service/GreatCircle.php.
+    """
+    need = _digits(group[0]["type_designator"])
+    cand = _narrow(group, lambda r: not need or _is_subsequence(need, _digits(r["model"])))
+    cand = _narrow(cand, lambda r: not _DERIVATIVE.search(r["model"]))
+    return min(cand, key=lambda r: (len(r["model"]), r["manufacturer"], r["model"]))
+
+
+def load_aircraft_reference(path, designators):
+    """{designator: (manufacturer, model)} for each designator, from the CSV.
+
+    Values come from the same DOC 8643 export an admin imports, so a generated
+    flight carries exactly what reconciliation would produce: the fixture
+    displays correctly with no reconcile run, and a recheck is a no-op. A
+    designator missing from the reference is a hard error — we will not emit an
+    aircraft the product cannot reconcile.
+    """
+    groups = {}
+    with open(path, encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            designator = (row.get("type_designator") or "").strip().upper()
+            if designator and row.get("manufacturer") and row.get("model"):
+                groups.setdefault(designator, []).append(row)
+    # A model name shared by several rows cannot be resolved from free text, so
+    # it is unusable as the "typed" value even though it is the right model.
+    model_counts = collections.Counter(
+        r["model"].strip().lower() for g in groups.values() for r in g
+    )
+
+    out = {}
+    missing = []
+    for code in sorted(designators):
+        group = groups.get(code)
+        if not group:
+            missing.append(code)
+            continue
+        best = _canonical(group)
+        manufacturer, model = best["manufacturer"].strip(), best["model"].strip()
+        # What a user would plausibly have typed. Prefer the model name for
+        # realism, but fall back to the designator when the model is ambiguous
+        # (E190's canonical model is the bare "190") or is itself a designator —
+        # either would resolve somewhere other than this row.
+        typed = model
+        if model_counts[model.lower()] > 1 or model.upper() in groups:
+            typed = code
+        out[code] = (manufacturer, model, typed)
+    if missing:
+        raise SystemExit(
+            "Aircraft reference data is missing designators: " + ", ".join(missing)
+            + ". Use the DOC 8643 CSV that contains them."
+        )
+    return out
+
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
     "--airports", default=_default_reference_path(),
     help="Path to the reference airports JSON (mwgg/Airports format, keyed by "
          "ICAO). Defaults to airports.json next to this script or in the CWD.",
+)
+parser.add_argument(
+    "--aircraft-types", default=_default_aircraft_path(),
+    help="Path to the ICAO DOC 8643 CSV (the same file an admin imports). "
+         "Defaults to icao_aircraft_data.csv next to this script or in the CWD.",
 )
 parser.add_argument(
     "--out", default="tests/fixtures/demo-flights.json",
@@ -108,6 +206,12 @@ if not args.airports or not os.path.exists(args.airports):
     sys.exit(
         "Reference airports JSON not found. Pass --airports /path/to/airports.json "
         "(the same mwgg/Airports dataset an admin imports into Flight Journal)."
+    )
+
+if not args.aircraft_types or not os.path.exists(args.aircraft_types):
+    sys.exit(
+        "Aircraft reference CSV not found. Pass --aircraft-types /path/to/"
+        "icao_aircraft_data.csv (the same DOC 8643 export an admin imports)."
     )
 
 AIRPORTS = load_reference(args.airports, CURATED_CODES)
@@ -125,19 +229,37 @@ def haversine_km(a, b):
 
 
 # --- Aircraft -------------------------------------------------------------------
-AC_RAW = {
-    "A319": "A319", "A320": "A320", "A321": "A321",
-    "A20N": "A320neo", "A21N": "A321neo",
-    "B738": "B737-800", "B38M": "737 MAX 8", "B752": "757-200",
-    "E190": "E190", "E195": "E195", "BCS3": "A220-300",
-    "A332": "A330-200", "A333": "A330-300", "A339": "A330-900neo",
-    "A343": "A340-300", "A346": "A340-600",
-    "A359": "A350-900", "A35K": "A350-1000", "A388": "A380-800",
-    "B744": "747-400", "B748": "747-8", "B763": "767-300",
-    "B772": "777-200", "B77W": "777-300ER",
-    "B788": "787-8", "B789": "787-9", "B78X": "787-10",
+# Deliberately unresolvable aircraft strings — plausible shorthand a real user
+# would type that the reference does not actually contain. Each is a *near* miss
+# for its designator, so the leg looks correct at a glance but reconciles to
+# nothing: it surfaces under the "Unmatched aircraft" filter and is realistic
+# material for fixing via the editor's type-ahead.
+#
+# The three failure shapes, all verified against the DOC 8643 data:
+#   - a manufacturer prefix the reference does not use ("B737-800" vs "737-800")
+#   - a trailing marketing word the reference carries ("787-9 Dreamliner")
+#   - a trailing programme name the reference carries ("A-350-900 XWB")
+# Keyed by designator; the second element groups them by *failure shape* so the
+# fixture can guarantee one of each rather than leaving it to the RNG.
+NEAR_MISS = {
+    "B738": ("B737-800", "prefix"),
+    "B788": ("787-8", "suffix-dreamliner"),
+    "B789": ("787-9", "suffix-dreamliner"),
+    "B78X": ("787-10", "suffix-dreamliner"),
+    "A359": ("A350-900", "suffix-xwb"),
+    "A35K": ("A350-1000", "suffix-xwb"),
+    "A339": ("A330-900neo", "suffix-neo"),
 }
 
+# How many legs per failure shape get the unresolvable string. Applied as a
+# deterministic post-pass rather than a probability: only a handful of legs use
+# a near-miss-capable designator at all, so chance regularly dropped a whole
+# shape and a reseed could silently remove one. NO_AIRCRAFT_RATE stays a
+# probability because it applies to every leg. Both are small on purpose:
+# enough to exercise the unmatched filter and the blank case, not enough to
+# make the demo data look broken.
+NEAR_MISS_PER_SHAPE = 3
+NO_AIRCRAFT_RATE = 0.03
 NB_DEFAULT = ["A320", "A321", "A319", "B738", "A20N", "A21N"]
 NB = {
     "LH": ["A320", "A321", "A319", "A20N", "A21N", "E190"],
@@ -201,6 +323,15 @@ WB = {
 }
 
 
+# Every designator the fleet pools can produce, resolved once against the real
+# reference. Loaded here rather than beside AIRPORTS because it needs the pools.
+AIRCRAFT = load_aircraft_reference(
+    args.aircraft_types,
+    {c for pool in list(NB.values()) + list(WB.values()) for c in pool}
+    | set(NB_DEFAULT) | set(WB_DEFAULT) | set(NEAR_MISS),
+)
+
+
 def pick_aircraft(dist, al):
     if dist < 2300:
         pool = NB.get(al, NB_DEFAULT)
@@ -213,7 +344,14 @@ def pick_aircraft(dist, al):
     else:
         pool = WB.get(al, WB_DEFAULT)
     code = random.choice(pool)
-    return code, AC_RAW[code]
+
+    if random.random() < NO_AIRCRAFT_RATE:
+        # Nothing recorded at all — the blank case the unmatched filter also covers.
+        return None, None, None, None
+    manufacturer, model, typed = AIRCRAFT[code]
+    # `typed` resolves back to exactly this row, so the stored triple is what
+    # reconciliation produces: the fixture round-trips and a recheck is a no-op.
+    return code, typed, manufacturer, model
 
 
 # --- Registrations: a small reused tail pool per airline ------------------------
@@ -456,7 +594,7 @@ def build_flight(orig, dest, airline, d, day_seq):
     valid = orig in AIRPORTS and dest in AIRPORTS
     dist = haversine_km(orig, dest) if valid else None
     ref_dist = dist if dist is not None else 800
-    ac_code, ac_raw = pick_aircraft(ref_dist, airline)
+    ac_code, ac_raw, ac_mfr, ac_model = pick_aircraft(ref_dist, airline)
     cabin = pick_cabin(ref_dist)
     flight = {
         "flightDate": d.isoformat(),
@@ -469,6 +607,8 @@ def build_flight(orig, dest, airline, d, day_seq):
         "flightNumber": flight_number(airline, ref_dist),
         "aircraftTypeCode": ac_code,
         "aircraftTypeRaw": ac_raw,
+        "aircraftManufacturer": ac_mfr,
+        "aircraftModel": ac_model,
         "registration": pick_reg(airline),
         "cabinClass": cabin,
         "seat": pick_seat(cabin, ac_code in WIDEBODY),
@@ -538,7 +678,7 @@ for d in sorted(by_date):
             o_code, o_label = invalid_endpoint(l["orig"], l["olabel"])
             d_code, d_label = invalid_endpoint(l["dest"], l["dlabel"])
             ref = 1200
-            ac_code, ac_raw = pick_aircraft(ref, l["airline"] if l["airline"] in REG_POOL else "LH")
+            ac_code, ac_raw, ac_mfr, ac_model = pick_aircraft(ref, l["airline"] if l["airline"] in REG_POOL else "LH")
             cabin = pick_cabin(ref)
             flights.append({
                 "flightDate": d.isoformat(),
@@ -551,6 +691,8 @@ for d in sorted(by_date):
                 "flightNumber": flight_number(l["airline"], ref),
                 "aircraftTypeCode": ac_code,
                 "aircraftTypeRaw": ac_raw,
+                "aircraftManufacturer": ac_mfr,
+                "aircraftModel": ac_model,
                 "registration": pick_reg(l["airline"] if l["airline"] in REG_POOL else "LH"),
                 "cabinClass": cabin,
                 "seat": pick_seat(cabin, ac_code in WIDEBODY),
@@ -561,6 +703,25 @@ for d in sorted(by_date):
             })
         else:
             flights.append(build_flight(l["orig"], l["dest"], l["airline"], d, i))
+
+# --- Deliberately unresolvable aircraft strings ---------------------------------
+# Convert a fixed number of legs per failure shape, in date order so the choice
+# is stable across runs. These end up with no code and no manufacturer/model —
+# exactly how un-reconciled data really looks — so they surface under the
+# "Unmatched aircraft" filter and give the editor's type-ahead something to fix.
+_near_miss_done = collections.Counter()
+for _f in flights:
+    _entry = NEAR_MISS.get(_f["aircraftTypeCode"])
+    if _entry is None:
+        continue
+    _typed, _shape = _entry
+    if _near_miss_done[_shape] >= NEAR_MISS_PER_SHAPE:
+        continue
+    _near_miss_done[_shape] += 1
+    _f["aircraftTypeCode"] = None
+    _f["aircraftTypeRaw"] = _typed
+    _f["aircraftManufacturer"] = None
+    _f["aircraftModel"] = None
 
 envelope = {
     "app": "flightjournal",
