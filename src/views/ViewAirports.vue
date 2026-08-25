@@ -14,9 +14,12 @@ import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
 import MapMarker from 'vue-material-design-icons/MapMarker.vue'
 import { showError } from '@nextcloud/dialogs'
 import { listAirports } from '../api.ts'
+import { useFlightsStore } from '../store/flights.ts'
+import { countByAirport } from '../flightCounts.ts'
 import type { Airport } from '../types.ts'
 
 const router = useRouter()
+const store = useFlightsStore()
 
 const PAGE_SIZE = 100
 
@@ -47,7 +50,17 @@ async function fetchPage() {
 	}
 }
 
-onMounted(fetchPage)
+// The store is usually already warm (Flights is the default route); fetch only
+// if not. Counted here rather than server-side so the number is keyed by the
+// same value the flights filter matches on — see flightCounts.ts. A leg counts
+// once per distinct endpoint, matching the row's "to and from" action.
+const flightCounts = computed(() => countByAirport(store.flights))
+const flightCount = (a: Airport) => flightCounts.value.get((canonicalCode(a) ?? '').toUpperCase()) ?? 0
+
+onMounted(async () => {
+	fetchPage()
+	if (!store.loaded) await store.fetchAll()
+})
 
 let debounce: ReturnType<typeof setTimeout> | null = null
 watch(query, () => {
@@ -151,6 +164,9 @@ function showOnMap(a: Airport) {
 						<th>Coordinates</th>
 						<th>Elevation</th>
 						<th>Timezone</th>
+						<th class="numeric">
+							Flights
+						</th>
 						<th />
 					</tr>
 				</thead>
@@ -164,6 +180,9 @@ function showOnMap(a: Airport) {
 						<td>{{ coord(a) }}</td>
 						<td>{{ a.elevation ?? '' }}</td>
 						<td>{{ a.tz ?? '' }}</td>
+						<td class="numeric">
+							{{ flightCount(a) }}
+						</td>
 						<td class="row-actions">
 							<NcActions v-if="canonicalCode(a)" :force-menu="true">
 								<NcActionButton @click="showFlights(a, 'to')">
@@ -260,6 +279,10 @@ function showOnMap(a: Airport) {
 
 .pager-info {
 	color: var(--color-text-maxcontrast);
+}
+
+.airport-table .numeric {
+	text-align: end;
 }
 
 .row-actions {

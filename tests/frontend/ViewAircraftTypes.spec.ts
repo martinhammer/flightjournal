@@ -12,6 +12,13 @@ const { listAircraftTypes, push } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../src/api.ts', () => ({ listAircraftTypes }))
+// The views now read the flights store to count flights per row. Mock it with a
+// settable list so each test controls what the counts should be.
+const { flightsStore } = vi.hoisted(() => ({
+	flightsStore: { flights: [] as unknown[], loaded: true, fetchAll: vi.fn() },
+}))
+vi.mock('../../src/store/flights.ts', () => ({ useFlightsStore: () => flightsStore }))
+
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 
 import ViewAircraftTypes from '../../src/views/ViewAircraftTypes.vue'
@@ -53,6 +60,8 @@ function page(items: Array<Record<string, unknown>>) {
 describe('ViewAircraftTypes', () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		flightsStore.flights = []
+		flightsStore.loaded = true
 		listAircraftTypes.mockResolvedValue(page([b738]))
 	})
 
@@ -115,6 +124,21 @@ describe('ViewAircraftTypes', () => {
 		expect(rows[1].find('.default-badge').exists()).toBe(false)
 	})
 
+	/**
+	 * Header and body are edited separately, so a column added or removed on one
+	 * side only skews every cell after it without failing anything else. There is
+	 * no IATA column: `iata_code` is never written yet, so it would be blank on
+	 * every row.
+	 */
+	it('keeps the header and body column counts in step', async () => {
+		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+
+		const headers = wrapper.findAll('thead th').map((h) => h.text())
+		expect(headers).toEqual(['ICAO', 'Manufacturer', 'Model', 'Class', 'Engines', 'Wake', 'Flights', ''])
+		expect(wrapper.find('tbody tr').findAll('td')).toHaveLength(headers.length)
+	})
+
 	it('renders engine count and type together', async () => {
 		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
 		await flushPromises()
@@ -140,6 +164,49 @@ describe('ViewAircraftTypes', () => {
 		// A flight resolved to this row displays exactly this, so the filter hits.
 		const flightDisplay = [b738.manufacturer, b738.model].filter(Boolean).join(' ')
 		expect(query.aircraft.toUpperCase()).toBe(flightDisplay.toUpperCase())
+	})
+
+	/**
+	 * The count is keyed by the same value the flights filter matches on, so the
+	 * number shown is exactly what the row's own menu action would return. These
+	 * fixtures use the display fallbacks deliberately: only the fully resolved
+	 * legs should be attributed to the row.
+	 */
+	it('counts the flights attributed to each row', async () => {
+		flightsStore.flights = [
+			{ aircraftManufacturer: 'BOEING', aircraftModel: '737-800', aircraftTypeRaw: '738', aircraftTypeCode: 'B738' },
+			{ aircraftManufacturer: 'BOEING', aircraftModel: '737-800', aircraftTypeRaw: null, aircraftTypeCode: 'B738' },
+			// Half-reconciled: displays its raw text, so no row can claim it.
+			{ aircraftManufacturer: null, aircraftModel: null, aircraftTypeRaw: '737-800', aircraftTypeCode: 'B738' },
+			// A different type entirely.
+			{ aircraftManufacturer: 'AIRBUS', aircraftModel: 'A-320', aircraftTypeRaw: null, aircraftTypeCode: 'A320' },
+		]
+		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+
+		const cells = wrapper.find('tbody tr').findAll('td')
+		expect(cells[cells.length - 2].text()).toBe('2')
+	})
+
+	it('shows zero for a reference row never flown', async () => {
+		flightsStore.flights = []
+		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+
+		const cells = wrapper.find('tbody tr').findAll('td')
+		expect(cells[cells.length - 2].text()).toBe('0')
+	})
+
+	it('loads the flights only when the store is cold', async () => {
+		flightsStore.loaded = true
+		mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+		expect(flightsStore.fetchAll).not.toHaveBeenCalled()
+
+		flightsStore.loaded = false
+		mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+		expect(flightsStore.fetchAll).toHaveBeenCalledTimes(1)
 	})
 
 	it('tells the user how to populate an empty flown list', async () => {

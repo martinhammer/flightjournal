@@ -10,6 +10,13 @@ const { listAirports, push } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../src/api.ts', () => ({ listAirports }))
+// The views now read the flights store to count flights per row. Mock it with a
+// settable list so each test controls what the counts should be.
+const { flightsStore } = vi.hoisted(() => ({
+	flightsStore: { flights: [] as unknown[], loaded: true, fetchAll: vi.fn() },
+}))
+vi.mock('../../src/store/flights.ts', () => ({ useFlightsStore: () => flightsStore }))
+
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 
 import ViewAirports from '../../src/views/ViewAirports.vue'
@@ -55,6 +62,9 @@ const lhr = {
 }
 
 beforeEach(() => {
+	flightsStore.flights = []
+	flightsStore.loaded = true
+	flightsStore.fetchAll.mockClear()
 	listAirports.mockReset()
 	listAirports.mockResolvedValue(emptyPage)
 	push.mockClear()

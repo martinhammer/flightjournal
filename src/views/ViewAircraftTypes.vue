@@ -11,9 +11,12 @@ import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwit
 import Airplane from 'vue-material-design-icons/Airplane.vue'
 import { showError } from '@nextcloud/dialogs'
 import { listAircraftTypes } from '../api.ts'
+import { useFlightsStore } from '../store/flights.ts'
+import { countByAircraft } from '../flightCounts.ts'
 import { aircraftName, type AircraftType } from '../types.ts'
 
 const router = useRouter()
+const store = useFlightsStore()
 
 const PAGE_SIZE = 100
 
@@ -44,7 +47,16 @@ async function fetchPage() {
 	}
 }
 
-onMounted(fetchPage)
+// The store is usually already warm (Flights is the default route); fetch only
+// if not. Counting here rather than server-side keeps the number keyed by the
+// same value the flights filter matches on — see flightCounts.ts.
+const flightCounts = computed(() => countByAircraft(store.flights))
+const flightCount = (t: AircraftType) => flightCounts.value.get((typeName(t) ?? '').toUpperCase()) ?? 0
+
+onMounted(async () => {
+	fetchPage()
+	if (!store.loaded) await store.fetchAll()
+})
 
 let debounce: ReturnType<typeof setTimeout> | null = null
 watch(query, () => {
@@ -140,19 +152,24 @@ function showFlights(t: AircraftType) {
 				<thead>
 					<tr>
 						<th>ICAO</th>
-						<th>IATA</th>
+						<!-- No IATA column: `iata_code` exists in the schema but nothing
+						     writes it yet (the OpenFlights overlay is deferred), so it
+						     would render an empty cell on every row. Restore this and
+						     its <td> when the overlay lands. -->
 						<th>Manufacturer</th>
 						<th>Model</th>
 						<th>Class</th>
 						<th>Engines</th>
 						<th>Wake</th>
+						<th class="numeric">
+							Flights
+						</th>
 						<th />
 					</tr>
 				</thead>
 				<tbody>
 					<tr v-for="t in items" :key="t.id">
 						<td>{{ t.icaoCode }}</td>
-						<td>{{ t.iataCode ?? '' }}</td>
 						<td>{{ t.manufacturer ?? '' }}</td>
 						<td>
 							{{ t.model ?? '' }}
@@ -161,6 +178,9 @@ function showFlights(t: AircraftType) {
 						<td>{{ t.description ?? '' }}</td>
 						<td>{{ engines(t) }}</td>
 						<td>{{ t.wtc ?? '' }}</td>
+						<td class="numeric">
+							{{ flightCount(t) }}
+						</td>
 						<td class="row-actions">
 							<NcActions v-if="typeName(t)" :force-menu="true">
 								<NcActionButton @click="showFlights(t)">
@@ -250,6 +270,10 @@ function showFlights(t: AircraftType) {
 
 .pager-info {
 	color: var(--color-text-maxcontrast);
+}
+
+.aircraft-table .numeric {
+	text-align: end;
 }
 
 .row-actions {
