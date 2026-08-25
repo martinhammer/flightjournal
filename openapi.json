@@ -332,7 +332,7 @@
                     {
                         "name": "flownOnly",
                         "in": "query",
-                        "description": "When true, restrict to designators the user has flown",
+                        "description": "When true, restrict to the exact models the user has flown",
                         "schema": {
                             "type": "boolean",
                             "default": true

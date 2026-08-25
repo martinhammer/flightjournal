@@ -207,18 +207,30 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 		})
 	}
 
-	// Unmatched aircraft: legs with no reconciled ICAO type designator — whether
-	// because nothing was entered or because what was entered didn't resolve.
-	// Both are "this leg has no usable aircraft reference", which is the worklist
-	// the filter exists to produce, so they are deliberately one filter rather
-	// than two. (The aircraft filter's [blank] sentinel still isolates the
-	// entered-nothing case on its own if you want just that.)
+	// Unmatched aircraft: legs with no complete reference type, i.e. whose
+	// Aircraft column cannot show "MANUFACTURER Model". Three shapes qualify and
+	// are deliberately one filter, because they are one worklist — "this leg has
+	// no usable aircraft reference":
+	//
+	//   - nothing entered at all
+	//   - entered, but it did not resolve
+	//   - half-reconciled: a designator but no manufacturer/model, which a JSON
+	//     restore produces by honouring a stored code without resolving it
+	//
+	// Keyed on the manufacturer/model pair rather than on `aircraftTypeCode`,
+	// which missed that third shape entirely: those legs have a code, so they
+	// were invisible here *and* absent from the Aircraft types flown list, with
+	// nothing anywhere to reveal them. The pair also matches what the flown list
+	// requires, so the two views agree on what "resolved" means.
+	//
+	// (The aircraft filter's [blank] sentinel still isolates the entered-nothing
+	// case on its own if you want just that.)
 	if (query.unmatchedAircraft === '1') {
 		filters.push({
 			id: 'unmatchedAircraft',
 			label: 'Unmatched aircraft',
 			queryKeys: ['unmatchedAircraft'],
-			matches: (f) => !f.aircraftTypeCode,
+			matches: (f) => !f.aircraftManufacturer || !f.aircraftModel,
 		})
 	}
 

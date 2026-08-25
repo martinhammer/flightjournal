@@ -80,7 +80,7 @@ class AircraftTypeApiController extends OCSController {
 	 * @param string|null $q Optional search term matched against designator/iata/manufacturer/model
 	 * @param int $limit Page size (1..500, default 100)
 	 * @param int $offset Row offset (>= 0)
-	 * @param bool $flownOnly When true, restrict to designators the user has flown
+	 * @param bool $flownOnly When true, restrict to the exact models the user has flown
 	 * @return DataResponse<Http::STATUS_OK, array{items: list<array{id: int, icaoCode: string, iataCode: ?string, manufacturer: ?string, model: ?string, modelNormalized: ?string, engineType: ?string, engineCount: ?int, wtc: ?string, description: ?string, canonical: bool, source: ?string, updatedAt: int}>, total: int, limit: int, offset: int}, array{}>
 	 *
 	 * 200: Page of aircraft types returned
@@ -90,16 +90,16 @@ class AircraftTypeApiController extends OCSController {
 	public function list(?string $q = null, int $limit = self::DEFAULT_LIMIT, int $offset = 0, bool $flownOnly = true): DataResponse {
 		$limit = max(1, min(self::MAX_LIMIT, $limit));
 		$offset = max(0, $offset);
-		$designators = null;
+		$models = null;
 		if ($flownOnly) {
 			$user = $this->userSession->getUser();
-			$designators = $user === null ? [] : $this->flights->findFlownAircraftCodes($user->getUID());
+			$models = $user === null ? [] : $this->flights->findFlownAircraftModels($user->getUID());
 		}
 		$items = array_values(array_map(
 			static fn ($type) => $type->jsonSerialize(),
-			$this->types->search($q, $limit, $offset, $designators),
+			$this->types->search($q, $limit, $offset, $models),
 		));
-		$total = $this->types->countSearch($q, $designators);
+		$total = $this->types->countSearch($q, $models);
 		return new DataResponse([
 			'items' => $items,
 			'total' => $total,

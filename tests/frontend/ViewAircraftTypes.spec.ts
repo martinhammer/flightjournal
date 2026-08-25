@@ -122,6 +122,26 @@ describe('ViewAircraftTypes', () => {
 		expect(wrapper.find('tbody tr').text()).toContain('2 × Jet')
 	})
 
+	/**
+	 * The rule the flown list is built on: a row belongs there only if its own
+	 * menu action leads to at least one flight. Since that action filters on the
+	 * row's displayed name and the flights filter matches `aircraftDisplay`, the
+	 * link text and the filter value have to be the same string — which is what
+	 * makes matching on (manufacturer, model) the right restriction rather than
+	 * on the shared designator.
+	 */
+	it('links using the same string the flights filter matches on', async () => {
+		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+
+		await wrapper.find('button.action').trigger('click')
+		const query = push.mock.calls[0][0].query as { aircraft: string }
+
+		// A flight resolved to this row displays exactly this, so the filter hits.
+		const flightDisplay = [b738.manufacturer, b738.model].filter(Boolean).join(' ')
+		expect(query.aircraft.toUpperCase()).toBe(flightDisplay.toUpperCase())
+	})
+
 	it('tells the user how to populate an empty flown list', async () => {
 		listAircraftTypes.mockResolvedValue(page([]))
 		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })

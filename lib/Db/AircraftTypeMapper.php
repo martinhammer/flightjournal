@@ -109,13 +109,13 @@ class AircraftTypeMapper extends QBMapper {
 	 * A page of aircraft types, grouped by designator with its default model
 	 * first so the variants read as belonging to it.
 	 *
-	 * When $designators is non-null, restrict to those ICAO type designators
+	 * When $models is non-null, restrict to those (manufacturer, model) pairs
 	 * (case-insensitive); an empty list matches nothing.
 	 *
-	 * @param list<string>|null $designators
+	 * @param list<array{manufacturer: string, model: string}>|null $models
 	 * @return AircraftType[]
 	 */
-	public function search(?string $q, int $limit, int $offset, ?array $designators = null): array {
+	public function search(?string $q, int $limit, int $offset, ?array $models = null): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')
 			->from($this->getTableName())
@@ -126,19 +126,19 @@ class AircraftTypeMapper extends QBMapper {
 			->setMaxResults($limit)
 			->setFirstResult($offset);
 		$this->applySearch($qb, $q);
-		$this->applyDesignators($qb, $designators);
+		$this->applyModels($qb, $models);
 		return $this->findEntities($qb);
 	}
 
 	/**
-	 * @param list<string>|null $designators See {@see search()}.
+	 * @param list<array{manufacturer: string, model: string}>|null $models See {@see search()}.
 	 */
-	public function countSearch(?string $q, ?array $designators = null): int {
+	public function countSearch(?string $q, ?array $models = null): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select($qb->func()->count('*', 'cnt'))
 			->from($this->getTableName());
 		$this->applySearch($qb, $q);
-		$this->applyDesignators($qb, $designators);
+		$this->applyModels($qb, $models);
 		$result = $qb->executeQuery();
 		$row = $result->fetch();
 		$result->closeCursor();
@@ -176,13 +176,20 @@ class AircraftTypeMapper extends QBMapper {
 	}
 
 	/**
-	 * @param list<string>|null $designators
+	 * Restrict to a set of (manufacturer, model) pairs.
+	 *
+	 * Built as an OR of ANDs rather than a row-value `IN ((a,b),(c,d))`: tuple
+	 * IN is not reliably portable across the databases Nextcloud supports. The
+	 * clause count is the number of distinct types the user has flown, so it
+	 * stays in the tens.
+	 *
+	 * @param list<array{manufacturer: string, model: string}>|null $models
 	 */
-	private function applyDesignators(IQueryBuilder $qb, ?array $designators): void {
-		if ($designators === null) {
+	private function applyModels(IQueryBuilder $qb, ?array $models): void {
+		if ($models === null) {
 			return;
 		}
-		if ($designators === []) {
+		if ($models === []) {
 			// Restricted to an empty set — match nothing.
 			$qb->andWhere($qb->expr()->eq(
 				$qb->createNamedParameter(0, IQueryBuilder::PARAM_INT),
@@ -190,11 +197,20 @@ class AircraftTypeMapper extends QBMapper {
 			));
 			return;
 		}
-		$lower = array_values(array_unique(array_map('mb_strtolower', $designators)));
-		$qb->andWhere($qb->expr()->in(
-			$qb->func()->lower('icao_code'),
-			$qb->createNamedParameter($lower, IQueryBuilder::PARAM_STR_ARRAY),
-		));
+		$clauses = [];
+		foreach ($models as $pair) {
+			$clauses[] = $qb->expr()->andX(
+				$qb->expr()->eq(
+					$qb->func()->lower('manufacturer'),
+					$qb->createNamedParameter(mb_strtolower($pair['manufacturer'])),
+				),
+				$qb->expr()->eq(
+					$qb->func()->lower('model'),
+					$qb->createNamedParameter(mb_strtolower($pair['model'])),
+				),
+			);
+		}
+		$qb->andWhere($qb->expr()->orX(...$clauses));
 	}
 
 	/**

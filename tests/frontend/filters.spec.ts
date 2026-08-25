@@ -14,6 +14,8 @@ function flight(originCode: string, destinationCode: string): Flight {
 		flightNumber: null,
 		aircraftTypeCode: null,
 		aircraftTypeRaw: null,
+		aircraftManufacturer: null,
+		aircraftModel: null,
 		registration: null,
 		cabinClass: null,
 		seat: null,
@@ -248,26 +250,41 @@ describe('new filter matchers', () => {
 	})
 
 	/**
-	 * Deliberately one filter covering both "nothing entered" and "entered but
-	 * did not resolve" — together they are the "no usable aircraft reference"
-	 * worklist this exists to produce.
+	 * Deliberately one filter covering every way a leg can lack a usable
+	 * reference type — they are one worklist. The half-reconciled shape (id 4) is
+	 * the one a code-based predicate missed: it has a designator, so it was
+	 * invisible both here and in the Aircraft types flown list.
 	 */
-	it('unmatchedAircraft matches legs with no reconciled type code', () => {
+	it('unmatchedAircraft matches every leg with no complete reference type', () => {
 		const list = [
-			f({ id: 1, aircraftTypeRaw: 'B738', aircraftTypeCode: 'B738' }),
-			f({ id: 2, aircraftTypeRaw: 'mystery jet', aircraftTypeCode: null }),
-			f({ id: 3, aircraftTypeRaw: null, aircraftTypeCode: null }),
+			// Fully resolved — the only one that should be excluded.
+			f({
+				id: 1, aircraftTypeRaw: '738', aircraftTypeCode: 'B738',
+				aircraftManufacturer: 'BOEING', aircraftModel: '737-800',
+			}),
+			// Entered, did not resolve.
+			f({ id: 2, aircraftTypeRaw: 'mystery jet' }),
+			// Nothing entered at all.
+			f({ id: 3 }),
+			// Half-reconciled: a code from a restored backup, never resolved.
+			f({ id: 4, aircraftTypeRaw: '737-800', aircraftTypeCode: 'B738' }),
+			// Model without manufacturer: the column shows a bare model, and the
+			// flown list would not accept it either, so it counts as incomplete.
+			f({ id: 5, aircraftTypeCode: 'B738', aircraftModel: '737-800' }),
 		]
 		const filtered = applyFilters(list, buildFilters({ unmatchedAircraft: '1' }))
-		expect(filtered.map((x) => x.id).sort()).toEqual([2, 3])
+		expect(filtered.map((x) => x.id).sort()).toEqual([2, 3, 4, 5])
 	})
 
 	it('unmatchedAircraft is independent of the airport unmatched filter', () => {
 		const list = [
 			// Airports resolved, aircraft did not.
-			f({ id: 1, originCode: 'LHR', destinationCode: 'JFK', aircraftTypeCode: null }),
+			f({ id: 1, originCode: 'LHR', destinationCode: 'JFK' }),
 			// Aircraft resolved, an airport did not.
-			f({ id: 2, originCode: null, destinationCode: 'JFK', aircraftTypeCode: 'B738' }),
+			f({
+				id: 2, originCode: null, destinationCode: 'JFK',
+				aircraftTypeCode: 'B738', aircraftManufacturer: 'BOEING', aircraftModel: '737-800',
+			}),
 		]
 		expect(applyFilters(list, buildFilters({ unmatchedAircraft: '1' })).map((x) => x.id)).toEqual([1])
 		expect(applyFilters(list, buildFilters({ unmatchedAirports: '1' })).map((x) => x.id)).toEqual([2])

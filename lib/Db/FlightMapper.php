@@ -80,35 +80,49 @@ class FlightMapper extends QBMapper {
 	}
 
 	/**
-	 * Distinct ICAO type designators the user has flown.
+	 * Distinct (manufacturer, model) pairs the user has actually flown.
 	 *
-	 * The designator is the flight's authoritative link to the reference table
-	 * (aircraft_manufacturer/aircraft_model are a display denormalisation), so
-	 * this is what the Aircraft types view restricts on. One consequence: a
-	 * designator covering several models surfaces all of them, including
-	 * siblings the user has not flown.
+	 * This is what the Aircraft types view restricts on, and the pair — not the
+	 * designator — is the right key for one reason: the view's row menu links to
+	 * the flights filtered by that row's displayed name, and the filter matches
+	 * on `aircraftDisplay`, which is exactly "MANUFACTURER Model". So a row
+	 * belongs in the flown list precisely when this query returns its pair; any
+	 * other rule lists rows whose own menu action leads to an empty screen.
 	 *
-	 * @return list<string>
+	 * Restricting on the designator instead surfaced every sibling model sharing
+	 * it — on the demo dataset, 41 rows for 21 flown models, the padding being
+	 * BBJ/ACJ conversions and military variants nobody flew.
+	 *
+	 * Both halves must be present: a flight carrying a model but no manufacturer
+	 * displays as the bare model, so no reference row's link would match it.
+	 *
+	 * @return list<array{manufacturer: string, model: string}>
 	 */
-	public function findFlownAircraftCodes(string $userId): array {
+	public function findFlownAircraftModels(string $userId): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->selectDistinct('aircraft_type_code')
+		$qb->selectDistinct('aircraft_manufacturer')
+			->addSelect('aircraft_model')
 			->from($this->getTableName())
 			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
-			->andWhere($qb->expr()->isNotNull('aircraft_type_code'));
+			->andWhere($qb->expr()->isNotNull('aircraft_manufacturer'))
+			->andWhere($qb->expr()->isNotNull('aircraft_model'));
 		$result = $qb->executeQuery();
-		$codes = [];
+		$pairs = [];
 		while (true) {
 			$row = $result->fetch();
 			if (!is_array($row)) {
 				break;
 			}
-			if (is_string($row['aircraft_type_code']) && $row['aircraft_type_code'] !== '') {
-				$codes[$row['aircraft_type_code']] = true;
+			if (is_string($row['aircraft_manufacturer']) && $row['aircraft_manufacturer'] !== ''
+				&& is_string($row['aircraft_model']) && $row['aircraft_model'] !== '') {
+				$pairs[$row['aircraft_manufacturer'] . "\0" . $row['aircraft_model']] = [
+					'manufacturer' => $row['aircraft_manufacturer'],
+					'model' => $row['aircraft_model'],
+				];
 			}
 		}
 		$result->closeCursor();
-		return array_keys($codes);
+		return array_values($pairs);
 	}
 
 	/**
