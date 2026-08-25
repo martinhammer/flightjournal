@@ -9,7 +9,7 @@ import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwit
 import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNative'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import Plus from 'vue-material-design-icons/Plus.vue'
-import { listAirports } from '../api.ts'
+import { listAircraftTypes, listAirports } from '../api.ts'
 import { BLANK_FILTER } from '../filters.ts'
 import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
 
@@ -47,17 +47,20 @@ const stagedAircraft = ref<Set<string>>(new Set())
 const airlineSearch = ref('')
 const aircraftSearch = ref('')
 
-// Whether the instance has any airport reference data. The "Unmatched airports"
-// filter is only meaningful when reconciliation has something to match against,
-// so the menu item is hidden until we confirm at least one reference airport.
-const hasReferenceData = ref(false)
+// Whether the instance has airport / aircraft reference data. The two
+// "Unmatched …" filters are only meaningful when reconciliation has something to
+// match against, so each menu item stays hidden until its own reference table is
+// confirmed non-empty. Probed separately because the two tables are imported
+// independently — an instance can easily have one and not the other.
+const hasAirportData = ref(false)
+const hasAircraftData = ref(false)
 onMounted(async () => {
-	try {
-		const page = await listAirports('', 1, 0, false)
-		hasReferenceData.value = page.total > 0
-	} catch {
-		hasReferenceData.value = false
-	}
+	const [airports, aircraft] = await Promise.allSettled([
+		listAirports('', 1, 0, false),
+		listAircraftTypes('', 1, 0, false),
+	])
+	hasAirportData.value = airports.status === 'fulfilled' && airports.value.total > 0
+	hasAircraftData.value = aircraft.status === 'fulfilled' && aircraft.value.total > 0
 })
 
 // Whether the user has any date with more than one flight — the precondition for
@@ -71,11 +74,13 @@ const hasMultiFlightDays = computed<boolean>(() => {
 	return false
 })
 
-// These two are toggles (no editor surface): hide the menu item once active so
-// it isn't a no-op entry — the chip's close button is how you turn it back off.
-const unmatchedActive = computed(() => route.query.unmatched === '1')
+// These are toggles (no editor surface): hide the menu item once active so it
+// isn't a no-op entry — the chip's close button is how you turn it back off.
+const unmatchedAirportsActive = computed(() => route.query.unmatchedAirports === '1')
+const unmatchedAircraftActive = computed(() => route.query.unmatchedAircraft === '1')
 const multidayActive = computed(() => route.query.multiday === '1')
-const showUnmatched = computed(() => hasReferenceData.value && !unmatchedActive.value)
+const showUnmatchedAirports = computed(() => hasAirportData.value && !unmatchedAirportsActive.value)
+const showUnmatchedAircraft = computed(() => hasAircraftData.value && !unmatchedAircraftActive.value)
 const showMultiday = computed(() => hasMultiFlightDays.value && !multidayActive.value)
 
 // Distinct airline / aircraft codes derived from the user's own flights —
@@ -215,8 +220,12 @@ function applyAircraft() {
 }
 
 // The two toggle filters commit straight from the menu — no editor to dismiss.
-function applyUnmatched() {
-	commit({ unmatched: '1' })
+function applyUnmatchedAirports() {
+	commit({ unmatchedAirports: '1' })
+}
+
+function applyUnmatchedAircraft() {
+	commit({ unmatchedAircraft: '1' })
 }
 
 function applyMultiday() {
@@ -278,9 +287,12 @@ const editorTitle = computed(() => {
 			<NcActionButton :close-after-click="true" @click="openEditor('aircraft')">
 				Aircraft type
 			</NcActionButton>
-			<NcActionSeparator v-if="showUnmatched || showMultiday" />
-			<NcActionButton v-if="showUnmatched" :close-after-click="true" @click="applyUnmatched">
+			<NcActionSeparator v-if="showUnmatchedAirports || showUnmatchedAircraft || showMultiday" />
+			<NcActionButton v-if="showUnmatchedAirports" :close-after-click="true" @click="applyUnmatchedAirports">
 				Unmatched airports
+			</NcActionButton>
+			<NcActionButton v-if="showUnmatchedAircraft" :close-after-click="true" @click="applyUnmatchedAircraft">
+				Unmatched aircraft
 			</NcActionButton>
 			<NcActionButton v-if="showMultiday" :close-after-click="true" @click="applyMultiday">
 				Days with multiple flights

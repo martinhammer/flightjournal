@@ -17,6 +17,20 @@ const { store, push } = vi.hoisted(() => ({
 }))
 
 vi.mock('../../src/store/flights.ts', () => ({ useFlightsStore: () => store }))
+
+// AircraftTypeField mounts for real here (the aircraft wiring is what two of
+// these tests cover), so its type-ahead lookup must not reach the real module.
+const { listAircraftTypes } = vi.hoisted(() => ({ listAircraftTypes: vi.fn() }))
+vi.mock('../../src/api.ts', () => ({
+	listAircraftTypes,
+	resolveAircraftType: vi.fn().mockResolvedValue({ match: null, referenceLoaded: false }),
+}))
+
+const b738 = {
+	id: 1, icaoCode: 'B738', iataCode: null, manufacturer: 'BOEING', model: '737-800',
+	modelNormalized: '737800', engineType: 'Jet', engineCount: 2, wtc: 'M',
+	description: 'LandPlane', canonical: true, source: 'csv-upload', updatedAt: 0,
+}
 // Keep vue-router's real exports (NcButton injects `routerKey`); override only
 // the composables the view uses.
 vi.mock('vue-router', async (importOriginal) => ({
@@ -51,6 +65,9 @@ const stubs = {
 	NcTextField: true,
 	NcSelect: true,
 	NcDateTimePickerNative: true,
+	// Has its own spec; stubbed here so it doesn't schedule a debounced lookup
+	// against the real api module during these tests.
+	AircraftResolution: true,
 }
 
 async function mountLoaded() {
@@ -63,6 +80,8 @@ async function mountLoaded() {
 beforeEach(() => {
 	store.update.mockClear()
 	push.mockClear()
+	listAircraftTypes.mockReset()
+	listAircraftTypes.mockResolvedValue({ items: [b738], total: 1, limit: 8, offset: 0 })
 })
 
 describe('EditFlightLog save', () => {
@@ -85,6 +104,67 @@ describe('EditFlightLog save', () => {
 			// from the (possibly edited) label.
 			originCode: null,
 			destinationCode: null,
+		}))
+	})
+
+	/**
+	 * The feedback line must follow the field as it is edited, not the value the
+	 * flight was loaded with — otherwise it keeps reporting the stale result
+	 * while the user types a correction.
+	 */
+	it('feeds the live aircraft text to the resolution preview', async () => {
+		const wrapper = await mountLoaded()
+		const preview = wrapper.findComponent({ name: 'AircraftResolution' })
+		expect(preview.props('raw')).toBe('A320')
+
+		const fields = wrapper.findAllComponents({ name: 'NcTextField' })
+		const aircraft = fields.find((f) => f.props('label') === 'Aircraft type')!
+		await aircraft.vm.$emit('update:model-value', 'B738')
+		await flushPromises()
+
+		expect(preview.props('raw')).toBe('B738')
+	})
+
+	/**
+	 * The seam between the picker and the payload. Sending the triple is what
+	 * tells the backend to honour the choice instead of reconciling the text, so
+	 * a pick that never reaches the request would silently do nothing.
+	 */
+	it('sends the picked reference type, leaving the typed text alone', async () => {
+		vi.useFakeTimers()
+		try {
+			const wrapper = await mountLoaded()
+			const fields = wrapper.findAllComponents({ name: 'NcTextField' })
+			const aircraft = fields.find((f) => f.props('label') === 'Aircraft type')!
+
+			await aircraft.vm.$emit('update:model-value', 'the boeing')
+			await vi.advanceTimersByTimeAsync(250)
+			await flushPromises()
+			await wrapper.find('.suggestion').trigger('click')
+
+			await wrapper.find('form').trigger('submit')
+			await flushPromises()
+
+			expect(store.update).toHaveBeenCalledWith(1, expect.objectContaining({
+				aircraftTypeCode: 'B738',
+				aircraftManufacturer: 'BOEING',
+				aircraftModel: '737-800',
+				aircraftTypeRaw: 'the boeing',
+			}))
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it('sends no aircraft code when nothing was picked, so the server reconciles', async () => {
+		const wrapper = await mountLoaded()
+		await wrapper.find('form').trigger('submit')
+		await flushPromises()
+
+		expect(store.update).toHaveBeenCalledWith(1, expect.objectContaining({
+			aircraftTypeCode: null,
+			aircraftManufacturer: null,
+			aircraftModel: null,
 		}))
 	})
 })

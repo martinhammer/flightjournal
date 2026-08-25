@@ -284,7 +284,18 @@ class FlightService {
 				// Nothing recorded for this leg — not a miss, just absent.
 				continue;
 			}
-			if ($onlyMissing && $code !== null) {
+			// "Missing" means missing *reference data*, not merely missing a code.
+			// A row can carry a designator with no manufacturer/model — a JSON
+			// restore honours a stored code verbatim without resolving it — and
+			// keying the skip on the code alone would strand those forever: the
+			// Aircraft column falls back to the raw text, and every default run
+			// declines to fix it while reporting success. All three must be present
+			// before a row counts as done, because the column renders manufacturer
+			// and model together.
+			if ($onlyMissing
+				&& $code !== null
+				&& $flight->getAircraftManufacturer() !== null
+				&& $flight->getAircraftModel() !== null) {
 				continue;
 			}
 

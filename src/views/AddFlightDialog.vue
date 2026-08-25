@@ -7,7 +7,8 @@ import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
-import { CABIN_CLASSES, type FlightInput } from '../types.ts'
+import AircraftTypeField from '../components/AircraftTypeField.vue'
+import { CABIN_CLASSES, withAircraftSelection, type AircraftSelection, type FlightInput } from '../types.ts'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{(e: 'update:open', value: boolean): void}>()
@@ -25,6 +26,8 @@ const blank = (): FlightInput => ({
 	flightNumber: null,
 	aircraftTypeCode: null,
 	aircraftTypeRaw: null,
+	aircraftManufacturer: null,
+	aircraftModel: null,
 	registration: null,
 	cabinClass: null,
 	seat: null,
@@ -34,12 +37,15 @@ const blank = (): FlightInput => ({
 const form = reactive<FlightInput>(blank())
 const cabinOptions = CABIN_CLASSES.map((c) => ({ id: c.value, label: c.label }))
 const cabinSelection = ref<{ id: string; label: string } | null>(null)
+// Set only when the user picks a reference model; see EditFlightLog for why.
+const aircraftSelection = ref<AircraftSelection | null>(null)
 watch(cabinSelection, (v) => { form.cabinClass = v?.id ?? null })
 
 watch(() => props.open, (isOpen) => {
 	if (isOpen) {
 		Object.assign(form, blank())
 		cabinSelection.value = null
+		aircraftSelection.value = null
 	}
 })
 
@@ -78,7 +84,7 @@ async function add() {
 	}
 	saving.value = true
 	try {
-		await store.create(form)
+		await store.create(withAircraftSelection(form, aircraftSelection.value))
 		showSuccess('Flight added')
 		close()
 	} catch (e: unknown) {
@@ -111,7 +117,11 @@ async function add() {
 				<NcTextField label="Flight number" :model-value="form.flightNumber ?? ''" @update:model-value="(v: string | number) => form.flightNumber = String(v) || null" />
 			</div>
 			<div class="row two">
-				<NcTextField label="Aircraft type" :model-value="form.aircraftTypeRaw ?? ''" @update:model-value="(v: string | number) => form.aircraftTypeRaw = String(v) || null" />
+				<AircraftTypeField
+					:raw="form.aircraftTypeRaw"
+					:selection="aircraftSelection"
+					@update:raw="form.aircraftTypeRaw = $event"
+					@update:selection="aircraftSelection = $event" />
 				<NcTextField label="Registration" :model-value="form.registration ?? ''" @update:model-value="(v: string | number) => form.registration = String(v) || null" />
 			</div>
 			<div class="row half">
@@ -149,7 +159,9 @@ async function add() {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 12px;
-	align-items: end;
+	/* start, not end: the aircraft cell carries a feedback line under its input,
+	   so bottom-aligning would push its neighbour down by that line's height. */
+	align-items: start;
 }
 
 .row.half {

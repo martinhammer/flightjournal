@@ -78,6 +78,27 @@ export async function listAircraftTypes(q: string, limit: number, offset: number
 	return res.data.ocs.data
 }
 
+export interface AircraftResolution {
+	match: { code: string; manufacturer: string | null; model: string | null } | null
+	/** False when the instance has no aircraft reference data at all. */
+	referenceLoaded: boolean
+}
+
+/**
+ * Ask the server what a free-text aircraft entry resolves to, without saving.
+ * Uses the same resolver reconciliation does, so the editor previews the real
+ * answer rather than a client-side approximation of it.
+ *
+ * @param q The free text as typed.
+ */
+export async function resolveAircraftType(q: string): Promise<AircraftResolution> {
+	const params = new URLSearchParams({ q })
+	const res = await axios.get<OcsResponse<AircraftResolution>>(
+		url(`/api/v1/aircraft-types/resolve?${params.toString()}`), config,
+	)
+	return res.data.ocs.data
+}
+
 export async function getAirportsByCodes(codes: string[]): Promise<Airport[]> {
 	if (codes.length === 0) return []
 	const params = new URLSearchParams({ codes: codes.join(',') })

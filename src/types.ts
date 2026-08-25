@@ -21,27 +21,74 @@ export interface Flight {
 	updatedAt: number
 }
 
+export type FlightInput = Omit<Flight, 'id' | 'daySeq' | 'distanceKm' | 'createdAt' | 'updatedAt'>
+
 /**
- * The aircraft manufacturer/model are server-derived by reconciliation, so the
- * editor never submits them — the same reason distanceKm is excluded. They
- * become part of the input only once the Edit view can override the resolved
- * model.
+ * One reference row as chosen in the aircraft type-ahead. Sending these three
+ * together is what tells the backend "the user picked this" — `resolveAircraft`
+ * then honours them verbatim instead of reconciling the free text.
+ *
+ * Kept as a cohesive triple rather than three loose fields so the same value can
+ * be applied to many flights at once by a future bulk update.
  */
-export type FlightInput = Omit<
-	Flight,
-	'id' | 'daySeq' | 'distanceKm' | 'createdAt' | 'updatedAt' | 'aircraftManufacturer' | 'aircraftModel'
->
+export interface AircraftSelection {
+	code: string
+	manufacturer: string | null
+	model: string | null
+}
+
+/**
+ * Fold a pick into the payload. With no pick the aircraft fields stay null and
+ * the server reconciles the free text — which is also what lets it preserve a
+ * previously stored type when the text is unchanged.
+ *
+ * `aircraftTypeRaw` is deliberately untouched: the picked values have their own
+ * columns, so the user's typed text survives the pick.
+ *
+ * @param input The form as edited.
+ * @param selection The reference row the user picked, if any.
+ */
+export function withAircraftSelection(input: FlightInput, selection: AircraftSelection | null): FlightInput {
+	if (!selection) return { ...input }
+	return {
+		...input,
+		aircraftTypeCode: selection.code,
+		aircraftManufacturer: selection.manufacturer,
+		aircraftModel: selection.model,
+	}
+}
+
+/**
+ * A reference type's human name: "BOEING 737-800". Null when neither half is
+ * present.
+ *
+ * Shared with the Aircraft types view and the editor's type-ahead so a reference
+ * row is spelled identically wherever it appears — the flights filter matches on
+ * this exact string, so a second copy of the join that drifted would silently
+ * produce links that match nothing.
+ *
+ * @param manufacturer The reference manufacturer.
+ * @param model The reference model.
+ */
+export function aircraftName(manufacturer: string | null, model: string | null): string | null {
+	return [manufacturer, model].filter(Boolean).join(' ') || null
+}
 
 /**
  * What the Aircraft column shows, in priority order: the reconciled reference
- * model, then the user's own text, then the bare designator. Model-first so the
- * resolved (and later, user-chosen) model is what the log actually displays.
- * Shared so the table, its sort key and the filters never disagree.
+ * type, then the user's own text, then the bare designator. Reference-first so
+ * the resolved (or user-chosen) type is what the log actually displays, rather
+ * than whatever shorthand happened to be typed.
+ *
+ * Shared so the table, its sort key, the filter matcher and the picker's option
+ * list never disagree about what a leg is called.
  *
  * @param f The flight to describe.
  */
-export function aircraftDisplay(f: Pick<Flight, 'aircraftModel' | 'aircraftTypeRaw' | 'aircraftTypeCode'>): string | null {
-	return f.aircraftModel ?? f.aircraftTypeRaw ?? f.aircraftTypeCode
+export function aircraftDisplay(
+	f: Pick<Flight, 'aircraftManufacturer' | 'aircraftModel' | 'aircraftTypeRaw' | 'aircraftTypeCode'>,
+): string | null {
+	return aircraftName(f.aircraftManufacturer, f.aircraftModel) ?? f.aircraftTypeRaw ?? f.aircraftTypeCode
 }
 
 export interface Airport {

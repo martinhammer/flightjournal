@@ -216,6 +216,48 @@ describe('ViewFlightLog distance column', () => {
 	})
 })
 
+describe('ViewFlightLog aircraft column', () => {
+	// Aircraft is the 5th column (date, flight, route, distance, aircraft, …).
+	const aircraftCell = (wrapper: ReturnType<typeof render>) =>
+		wrapper.find('tbody tr').findAll('td')[4].text()
+
+	it('shows the reference manufacturer and model, not the designator', () => {
+		store.flights = [{
+			...flight(1, 'LHR', 'JFK'),
+			aircraftTypeCode: 'B738',
+			aircraftTypeRaw: '738',
+			aircraftManufacturer: 'BOEING',
+			aircraftModel: '737-800',
+		}]
+		expect(aircraftCell(render())).toBe('BOEING 737-800')
+	})
+
+	/**
+	 * The fallback chain matters as much as the happy path: a leg that never
+	 * resolved must still show what the user typed rather than going blank.
+	 */
+	it('falls back to the typed text when nothing resolved', () => {
+		store.flights = [{
+			...flight(1, 'LHR', 'JFK'),
+			aircraftTypeRaw: 'mystery jet',
+		}]
+		expect(aircraftCell(render())).toBe('mystery jet')
+	})
+
+	it('falls back to the designator when only a code is stored', () => {
+		store.flights = [{
+			...flight(1, 'LHR', 'JFK'),
+			aircraftTypeCode: 'B738',
+		}]
+		expect(aircraftCell(render())).toBe('B738')
+	})
+
+	it('renders an empty cell when no aircraft was recorded', () => {
+		store.flights = [flight(1, 'LHR', 'JFK')]
+		expect(aircraftCell(render())).toBe('')
+	})
+})
+
 describe('ViewFlightLog within-day reordering', () => {
 	// Three legs on the same day, daySeq 1..3. Default sort is date desc, so the
 	// rows read top→bottom as the latest leg first: seq 3, seq 2, seq 1.

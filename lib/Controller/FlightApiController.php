@@ -75,6 +75,8 @@ class FlightApiController extends OCSController {
 	 * @param ?string $flightNumber Numeric portion of the flight number
 	 * @param ?string $aircraftTypeCode Canonical ICAO aircraft type code
 	 * @param ?string $aircraftTypeRaw Verbatim aircraft type as entered
+	 * @param ?string $aircraftManufacturer Reference manufacturer of an explicitly chosen model
+	 * @param ?string $aircraftModel Reference model explicitly chosen by the user
 	 * @param ?string $registration Aircraft registration
 	 * @param ?string $cabinClass Cabin class (economy|premium_economy|business|first|other)
 	 * @param ?string $seat Seat number
@@ -96,6 +98,8 @@ class FlightApiController extends OCSController {
 		?string $flightNumber = null,
 		?string $aircraftTypeCode = null,
 		?string $aircraftTypeRaw = null,
+		?string $aircraftManufacturer = null,
+		?string $aircraftModel = null,
 		?string $registration = null,
 		?string $cabinClass = null,
 		?string $seat = null,
@@ -105,6 +109,7 @@ class FlightApiController extends OCSController {
 			$flight = $this->service->create($this->getUserId(), compact(
 				'flightDate', 'originCode', 'destinationCode', 'originLabel', 'destinationLabel',
 				'airlineCode', 'flightNumber', 'aircraftTypeCode', 'aircraftTypeRaw',
+				'aircraftManufacturer', 'aircraftModel',
 				'registration', 'cabinClass', 'seat', 'notes',
 			));
 			return new DataResponse($flight->jsonSerialize(), Http::STATUS_CREATED);
@@ -126,6 +131,8 @@ class FlightApiController extends OCSController {
 	 * @param ?string $flightNumber Numeric portion of the flight number
 	 * @param ?string $aircraftTypeCode Canonical ICAO aircraft type code
 	 * @param ?string $aircraftTypeRaw Verbatim aircraft type as entered
+	 * @param ?string $aircraftManufacturer Reference manufacturer of an explicitly chosen model
+	 * @param ?string $aircraftModel Reference model explicitly chosen by the user
 	 * @param ?string $registration Aircraft registration
 	 * @param ?string $cabinClass Cabin class (economy|premium_economy|business|first|other)
 	 * @param ?string $seat Seat number
@@ -149,6 +156,8 @@ class FlightApiController extends OCSController {
 		?string $flightNumber = null,
 		?string $aircraftTypeCode = null,
 		?string $aircraftTypeRaw = null,
+		?string $aircraftManufacturer = null,
+		?string $aircraftModel = null,
 		?string $registration = null,
 		?string $cabinClass = null,
 		?string $seat = null,
@@ -158,6 +167,7 @@ class FlightApiController extends OCSController {
 			$flight = $this->service->update($id, $this->getUserId(), compact(
 				'flightDate', 'originCode', 'destinationCode', 'originLabel', 'destinationLabel',
 				'airlineCode', 'flightNumber', 'aircraftTypeCode', 'aircraftTypeRaw',
+				'aircraftManufacturer', 'aircraftModel',
 				'registration', 'cabinClass', 'seat', 'notes',
 			));
 			return new DataResponse($flight->jsonSerialize());

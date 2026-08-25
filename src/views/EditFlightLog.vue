@@ -7,7 +7,8 @@ import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNative'
 import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
-import { CABIN_CLASSES, type FlightInput } from '../types.ts'
+import AircraftTypeField from '../components/AircraftTypeField.vue'
+import { CABIN_CLASSES, withAircraftSelection, type AircraftSelection, type FlightInput } from '../types.ts'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +29,8 @@ const blank = (): FlightInput => ({
 	flightNumber: null,
 	aircraftTypeCode: null,
 	aircraftTypeRaw: null,
+	aircraftManufacturer: null,
+	aircraftModel: null,
 	registration: null,
 	cabinClass: null,
 	seat: null,
@@ -37,6 +40,15 @@ const blank = (): FlightInput => ({
 const form = reactive<FlightInput>(blank())
 const saving = ref(false)
 const loaded = ref(false)
+
+/**
+ * Set only when the user picks a reference model *in this session*. Left null on
+ * load on purpose: sending the stored code back would make the backend skip
+ * re-reconciling an edited entry (it honours explicit client codes). A stored
+ * pick still survives an unrelated edit, because the server preserves the whole
+ * stored triple when the raw text is unchanged.
+ */
+const aircraftSelection = ref<AircraftSelection | null>(null)
 
 const cabinOptions = CABIN_CLASSES.map((c) => ({ id: c.value, label: c.label }))
 const cabinSelection = ref<{ id: string; label: string } | null>(null)
@@ -70,12 +82,15 @@ async function load() {
 		flightNumber: existing.flightNumber,
 		aircraftTypeCode: null,
 		aircraftTypeRaw: existing.aircraftTypeRaw,
+		aircraftManufacturer: null,
+		aircraftModel: null,
 		registration: existing.registration,
 		cabinClass: existing.cabinClass,
 		seat: existing.seat,
 		notes: existing.notes,
 	})
 	cabinSelection.value = cabinOptions.find((c) => c.id === existing.cabinClass) ?? null
+	aircraftSelection.value = null
 	loaded.value = true
 }
 
@@ -114,7 +129,7 @@ async function save() {
 	}
 	saving.value = true
 	try {
-		await store.update(flightId.value, form)
+		await store.update(flightId.value, withAircraftSelection(form, aircraftSelection.value))
 		showSuccess('Flight updated')
 		backToFlights()
 	} catch (e: unknown) {
@@ -152,7 +167,11 @@ function cancel() {
 				<NcTextField label="Flight number" :model-value="form.flightNumber ?? ''" @update:model-value="(v: string | number) => form.flightNumber = String(v) || null" />
 			</div>
 			<div class="row two">
-				<NcTextField label="Aircraft type" :model-value="form.aircraftTypeRaw ?? ''" @update:model-value="(v: string | number) => form.aircraftTypeRaw = String(v) || null" />
+				<AircraftTypeField
+					:raw="form.aircraftTypeRaw"
+					:selection="aircraftSelection"
+					@update:raw="form.aircraftTypeRaw = $event"
+					@update:selection="aircraftSelection = $event" />
 				<NcTextField label="Registration" :model-value="form.registration ?? ''" @update:model-value="(v: string | number) => form.registration = String(v) || null" />
 			</div>
 			<div class="row half">
@@ -198,7 +217,9 @@ function cancel() {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 12px;
-	align-items: end;
+	/* start, not end: the aircraft cell carries a feedback line under its input,
+	   so bottom-aligning would push its neighbour down by that line's height. */
+	align-items: start;
 }
 
 .row.half {

@@ -3,8 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 
 // Covers the flown-only switch (the default that decides what the view shows at
 // all), the debounced search wiring, and the row menu's link into the Flights
-// view — which has to carry the *model*, since that is what the aircraft filter
-// matches on.
+// view — which has to carry the same "MANUFACTURER Model" string the Aircraft
+// column displays, since that is what the aircraft filter matches on.
 
 const { listAircraftTypes, push } = vi.hoisted(() => ({
 	listAircraftTypes: vi.fn(),
@@ -95,13 +95,13 @@ describe('ViewAircraftTypes', () => {
 		expect(listAircraftTypes).toHaveBeenCalledWith('boeing', 100, 0, true)
 	})
 
-	it('links a row to the flights filtered by its model, not its designator', async () => {
+	it('links a row to the flights filtered by its displayed name, not its designator', async () => {
 		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
 		await flushPromises()
 
 		await wrapper.find('button.action').trigger('click')
 
-		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { aircraft: '737-800' } })
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { aircraft: 'BOEING 737-800' } })
 	})
 
 	it('marks only the canonical model as the designator default', async () => {

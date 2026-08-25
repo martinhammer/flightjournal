@@ -129,15 +129,27 @@ describe('buildFilters', () => {
 	})
 
 	it('builds an unmatched-airports filter', () => {
-		const filters = buildFilters({ unmatched: '1' })
+		const filters = buildFilters({ unmatchedAirports: '1' })
 		expect(filters).toHaveLength(1)
-		expect(filters[0].id).toBe('unmatched')
+		expect(filters[0].id).toBe('unmatchedAirports')
 		expect(filters[0].label).toBe('Unmatched airports')
-		expect(filters[0].queryKeys).toEqual(['unmatched'])
+		expect(filters[0].queryKeys).toEqual(['unmatchedAirports'])
 	})
 
-	it('ignores an unmatched value other than "1"', () => {
-		expect(buildFilters({ unmatched: '0' })).toEqual([])
+	it('ignores an unmatchedAirports value other than "1"', () => {
+		expect(buildFilters({ unmatchedAirports: '0' })).toEqual([])
+	})
+
+	it('builds an unmatched-aircraft filter', () => {
+		const filters = buildFilters({ unmatchedAircraft: '1' })
+		expect(filters).toHaveLength(1)
+		expect(filters[0].id).toBe('unmatchedAircraft')
+		expect(filters[0].label).toBe('Unmatched aircraft')
+		expect(filters[0].queryKeys).toEqual(['unmatchedAircraft'])
+	})
+
+	it('ignores an unmatchedAircraft value other than "1"', () => {
+		expect(buildFilters({ unmatchedAircraft: '0' })).toEqual([])
 	})
 
 	it('builds a days-with-multiple-flights filter', () => {
@@ -224,15 +236,41 @@ describe('new filter matchers', () => {
 		expect(filtered.map((x) => x.id).sort()).toEqual([2])
 	})
 
-	it('unmatched matches legs missing either airport code', () => {
+	it('unmatchedAirports matches legs missing either airport code', () => {
 		const list = [
 			f({ id: 1, originCode: 'LHR', destinationCode: 'JFK' }),
 			f({ id: 2, originCode: null, destinationCode: 'JFK' }),
 			f({ id: 3, originCode: 'LHR', destinationCode: null }),
 			f({ id: 4, originCode: null, destinationCode: null }),
 		]
-		const filtered = applyFilters(list, buildFilters({ unmatched: '1' }))
+		const filtered = applyFilters(list, buildFilters({ unmatchedAirports: '1' }))
 		expect(filtered.map((x) => x.id).sort()).toEqual([2, 3, 4])
+	})
+
+	/**
+	 * Deliberately one filter covering both "nothing entered" and "entered but
+	 * did not resolve" — together they are the "no usable aircraft reference"
+	 * worklist this exists to produce.
+	 */
+	it('unmatchedAircraft matches legs with no reconciled type code', () => {
+		const list = [
+			f({ id: 1, aircraftTypeRaw: 'B738', aircraftTypeCode: 'B738' }),
+			f({ id: 2, aircraftTypeRaw: 'mystery jet', aircraftTypeCode: null }),
+			f({ id: 3, aircraftTypeRaw: null, aircraftTypeCode: null }),
+		]
+		const filtered = applyFilters(list, buildFilters({ unmatchedAircraft: '1' }))
+		expect(filtered.map((x) => x.id).sort()).toEqual([2, 3])
+	})
+
+	it('unmatchedAircraft is independent of the airport unmatched filter', () => {
+		const list = [
+			// Airports resolved, aircraft did not.
+			f({ id: 1, originCode: 'LHR', destinationCode: 'JFK', aircraftTypeCode: null }),
+			// Aircraft resolved, an airport did not.
+			f({ id: 2, originCode: null, destinationCode: 'JFK', aircraftTypeCode: 'B738' }),
+		]
+		expect(applyFilters(list, buildFilters({ unmatchedAircraft: '1' })).map((x) => x.id)).toEqual([1])
+		expect(applyFilters(list, buildFilters({ unmatchedAirports: '1' })).map((x) => x.id)).toEqual([2])
 	})
 
 	it('multiday matches only legs on dates with more than one flight', () => {

@@ -11,7 +11,7 @@ import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwit
 import Airplane from 'vue-material-design-icons/Airplane.vue'
 import { showError } from '@nextcloud/dialogs'
 import { listAircraftTypes } from '../api.ts'
-import type { AircraftType } from '../types.ts'
+import { aircraftName, type AircraftType } from '../types.ts'
 
 const router = useRouter()
 
@@ -89,20 +89,24 @@ function next() {
 	fetchPage()
 }
 
+const typeName = (t: AircraftType) => aircraftName(t.manufacturer, t.model)
+
 function engines(t: AircraftType): string {
 	if (t.engineType === null && t.engineCount === null) return ''
 	return [t.engineCount, t.engineType].filter((v) => v !== null && v !== '').join(' × ')
 }
 
 /**
- * The flights filter matches on the Aircraft column's displayed value, which
- * for a reconciled leg is the model — so that, not the designator, is what
- * links a reference row to the flights that resolved to it. Both sides are
- * upper-cased by the filter, so case here does not matter.
+ * The flights filter matches on the Aircraft column's displayed value, which for
+ * a reconciled leg is "MANUFACTURER Model" — so that, not the designator, is
+ * what links a reference row to the flights that resolved to it. Built from the
+ * shared aircraftName() for exactly that reason. Both sides are upper-cased by
+ * the filter, so case here does not matter.
  */
 function showFlights(t: AircraftType) {
-	if (!t.model) return
-	router.push({ name: 'flights', query: { aircraft: t.model } })
+	const name = typeName(t)
+	if (!name) return
+	router.push({ name: 'flights', query: { aircraft: name } })
 }
 </script>
 
@@ -158,12 +162,12 @@ function showFlights(t: AircraftType) {
 						<td>{{ engines(t) }}</td>
 						<td>{{ t.wtc ?? '' }}</td>
 						<td class="row-actions">
-							<NcActions v-if="t.model" :force-menu="true">
+							<NcActions v-if="typeName(t)" :force-menu="true">
 								<NcActionButton @click="showFlights(t)">
 									<template #icon>
 										<Airplane :size="20" />
 									</template>
-									Show flights on {{ t.model }}
+									Show flights on {{ typeName(t) }}
 								</NcActionButton>
 							</NcActions>
 						</td>

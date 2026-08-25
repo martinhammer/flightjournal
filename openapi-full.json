@@ -1078,6 +1078,136 @@
                 }
             }
         },
+        "/ocs/v2.php/apps/flightjournal/api/v1/aircraft-types/resolve": {
+            "get": {
+                "operationId": "aircraft_type_api-resolve",
+                "summary": "Report what a free-text aircraft entry resolves to, without saving.",
+                "description": "Exists so the flight editor can show the user the same answer reconciliation will reach on save. It delegates to the one resolver rather than letting the client approximate: the tiers (designator → exact model → punctuation-insensitive model) live on the server, and any client-side guess would drift from them and preview a match that never happens.\n`referenceLoaded` disambiguates the two ways a miss can happen — no match, versus no aircraft reference data on the instance at all. Only computed on a miss, so the common path stays a single lookup.",
+                "tags": [
+                    "aircraft_type_api"
+                ],
+                "security": [
+                    {
+                        "bearer_auth": []
+                    },
+                    {
+                        "basic_auth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "description": "The free text as typed",
+                        "schema": {
+                            "type": "string",
+                            "default": ""
+                        }
+                    },
+                    {
+                        "name": "OCS-APIRequest",
+                        "in": "header",
+                        "description": "Required to be true for the API request to pass",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean",
+                            "default": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Resolution reported (match may be null)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {
+                                                    "type": "object",
+                                                    "required": [
+                                                        "match",
+                                                        "referenceLoaded"
+                                                    ],
+                                                    "properties": {
+                                                        "match": {
+                                                            "type": "object",
+                                                            "nullable": true,
+                                                            "required": [
+                                                                "code",
+                                                                "manufacturer",
+                                                                "model"
+                                                            ],
+                                                            "properties": {
+                                                                "code": {
+                                                                    "type": "string"
+                                                                },
+                                                                "manufacturer": {
+                                                                    "type": "string",
+                                                                    "nullable": true
+                                                                },
+                                                                "model": {
+                                                                    "type": "string",
+                                                                    "nullable": true
+                                                                }
+                                                            }
+                                                        },
+                                                        "referenceLoaded": {
+                                                            "type": "boolean"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Current user is not logged in",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "ocs"
+                                    ],
+                                    "properties": {
+                                        "ocs": {
+                                            "type": "object",
+                                            "required": [
+                                                "meta",
+                                                "data"
+                                            ],
+                                            "properties": {
+                                                "meta": {
+                                                    "$ref": "#/components/schemas/OCSMeta"
+                                                },
+                                                "data": {}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/ocs/v2.php/apps/flightjournal/api/v1/aircraft-types": {
             "get": {
                 "operationId": "aircraft_type_api-list",

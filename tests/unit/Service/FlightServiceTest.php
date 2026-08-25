@@ -831,10 +831,12 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame(['flights' => 1, 'updated' => 1, 'matched' => 1, 'unmatched' => 0], $result);
 	}
 
-	public function testReconcileAircraftOnlyMissingSkipsFlightsWithACode(): void {
+	public function testReconcileAircraftOnlyMissingSkipsFullyResolvedFlights(): void {
 		$flight = new Flight();
 		$flight->setAircraftTypeRaw('B738');
 		$flight->setAircraftTypeCode('B738');
+		$flight->setAircraftManufacturer('BOEING');
+		$flight->setAircraftModel('737-800');
 
 		$this->mapper->method('findAllForUser')->willReturn([$flight]);
 		$this->mapper->expects($this->never())->method('update');
@@ -843,6 +845,49 @@ class FlightServiceTest extends TestCase {
 		$result = $this->service->reconcileAircraftAll('alice', true);
 
 		$this->assertSame(0, $result['updated']);
+	}
+
+	/**
+	 * A restored backup carries a code but no manufacturer/model, so the column
+	 * falls back to the raw text. Keying the skip on the code alone stranded
+	 * those rows: the default run declined to fix them and still reported
+	 * success. Each of the three fields must be able to trigger a repair.
+	 *
+	 * @dataProvider incompleteAircraftRows
+	 */
+	public function testReconcileAircraftOnlyMissingRepairsPartiallyResolvedFlights(
+		?string $manufacturer,
+		?string $model,
+	): void {
+		$flight = new Flight();
+		$flight->setAircraftTypeRaw('738');
+		$flight->setAircraftTypeCode('B738');
+		$flight->setAircraftManufacturer($manufacturer);
+		$flight->setAircraftModel($model);
+
+		$this->mapper->method('findAllForUser')->willReturn([$flight]);
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->aircraftReconciler->method('resolveDesignator')
+			->with('B738')
+			->willReturn(new AircraftMatch('B738', 'BOEING', '737-800'));
+
+		$result = $this->service->reconcileAircraftAll('alice', true);
+
+		$this->assertSame('BOEING', $flight->getAircraftManufacturer());
+		$this->assertSame('737-800', $flight->getAircraftModel());
+		$this->assertSame('738', $flight->getAircraftTypeRaw(), 'typed text untouched');
+		$this->assertSame(1, $result['updated']);
+	}
+
+	/**
+	 * @return array<string, array{0: ?string, 1: ?string}>
+	 */
+	public static function incompleteAircraftRows(): array {
+		return [
+			'neither' => [null, null],
+			'model without manufacturer' => [null, '737-800'],
+			'manufacturer without model' => ['BOEING', null],
+		];
 	}
 
 	/**

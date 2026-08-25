@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\FlightJournal\Db;
 
+use OCA\FlightJournal\Service\AircraftModelKey;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
@@ -157,11 +158,20 @@ class AircraftTypeMapper extends QBMapper {
 		}
 		$like = '%' . mb_strtolower($term) . '%';
 		$param = $qb->createNamedParameter($like);
+		// model_normalized is searched too, so the editor's type-ahead finds what
+		// reconciliation would find: "A320neo" reaches DOC 8643's "A-320neo".
+		// Without it the suggestion list would be strictly less capable than the
+		// free-text field it sits on. Matched against the normalised needle, since
+		// the stored key has its separators stripped.
 		$qb->andWhere($qb->expr()->orX(
 			$qb->expr()->like($qb->func()->lower('icao_code'), $param),
 			$qb->expr()->like($qb->func()->lower('iata_code'), $param),
 			$qb->expr()->like($qb->func()->lower('manufacturer'), $param),
 			$qb->expr()->like($qb->func()->lower('model'), $param),
+			$qb->expr()->like(
+				'model_normalized',
+				$qb->createNamedParameter('%' . AircraftModelKey::normalize($term) . '%'),
+			),
 		));
 	}
 

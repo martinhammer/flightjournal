@@ -198,12 +198,27 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 	// code (a null `_code` means "no confident match"). The FilterPicker only
 	// offers this when reference data exists, but the matcher itself is purely
 	// client-side and needs no list context.
-	if (query.unmatched === '1') {
+	if (query.unmatchedAirports === '1') {
 		filters.push({
-			id: 'unmatched',
+			id: 'unmatchedAirports',
 			label: 'Unmatched airports',
-			queryKeys: ['unmatched'],
+			queryKeys: ['unmatchedAirports'],
 			matches: (f) => !f.originCode || !f.destinationCode,
+		})
+	}
+
+	// Unmatched aircraft: legs with no reconciled ICAO type designator — whether
+	// because nothing was entered or because what was entered didn't resolve.
+	// Both are "this leg has no usable aircraft reference", which is the worklist
+	// the filter exists to produce, so they are deliberately one filter rather
+	// than two. (The aircraft filter's [blank] sentinel still isolates the
+	// entered-nothing case on its own if you want just that.)
+	if (query.unmatchedAircraft === '1') {
+		filters.push({
+			id: 'unmatchedAircraft',
+			label: 'Unmatched aircraft',
+			queryKeys: ['unmatchedAircraft'],
+			matches: (f) => !f.aircraftTypeCode,
 		})
 	}
 

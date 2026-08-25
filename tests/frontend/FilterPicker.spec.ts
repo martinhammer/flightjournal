@@ -17,10 +17,18 @@ vi.mock('vue-router', async (importOriginal) => ({
 	useRouter: () => ({ push }),
 }))
 
-// The picker probes airport reference data on mount to decide whether to offer
-// the "Unmatched airports" filter. Mock it so each test controls the count.
-const { listAirports } = vi.hoisted(() => ({ listAirports: vi.fn() }))
-vi.mock('../../src/api.ts', () => ({ listAirports }))
+// The picker probes both reference tables on mount to decide whether to offer
+// the two "Unmatched …" filters. Mock them so each test controls the counts —
+// they are probed independently because an instance can have one table loaded
+// and not the other.
+const { listAirports, listAircraftTypes } = vi.hoisted(() => ({
+	listAirports: vi.fn(),
+	listAircraftTypes: vi.fn(),
+}))
+vi.mock('../../src/api.ts', () => ({ listAirports, listAircraftTypes }))
+
+const emptyPage = { items: [], total: 0, limit: 1, offset: 0 }
+const loadedPage = { items: [], total: 42, limit: 1, offset: 0 }
 
 import FilterPicker from '../../src/components/FilterPicker.vue'
 import type { Flight } from '../../src/types.ts'
@@ -138,9 +146,12 @@ function render(flights: Flight[] = []) {
 beforeEach(() => {
 	push.mockClear()
 	routeHolder.query = {}
-	// Default: no reference data, so the "Unmatched airports" item is hidden.
+	// Default: no reference data of either kind, so both "Unmatched …" items are
+	// hidden and each test opts in to the table it cares about.
 	listAirports.mockReset()
-	listAirports.mockResolvedValue({ items: [], total: 0, limit: 1, offset: 0 })
+	listAircraftTypes.mockReset()
+	listAirports.mockResolvedValue(emptyPage)
+	listAircraftTypes.mockResolvedValue(emptyPage)
 })
 
 // Text of every menu action button (after onMounted's reference-data probe).
@@ -326,19 +337,80 @@ describe('FilterPicker — unmatched airports', () => {
 
 	it('hides the item when the filter is already active', async () => {
 		listAirports.mockResolvedValue({ items: [], total: 42, limit: 1, offset: 0 })
-		routeHolder.query = { unmatched: '1' }
+		routeHolder.query = { unmatchedAirports: '1' }
 		const wrapper = render()
 		expect(await menuItems(wrapper)).not.toContain('Unmatched airports')
 	})
 
-	it('commits unmatched=1 on click, preserving other keys', async () => {
+	it('commits unmatchedAirports=1 on click, preserving other keys', async () => {
 		listAirports.mockResolvedValue({ items: [], total: 42, limit: 1, offset: 0 })
 		routeHolder.query = { airline: 'EY' }
 		const wrapper = render()
 		await flushPromises()
 		const item = wrapper.findAll('.action-btn').find((b) => b.text() === 'Unmatched airports')!
 		await item.trigger('click')
-		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { airline: 'EY', unmatched: '1' } })
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { airline: 'EY', unmatchedAirports: '1' } })
+	})
+})
+
+describe('FilterPicker — unmatched aircraft', () => {
+	it('hides the item when the instance has no aircraft reference data', async () => {
+		const wrapper = render()
+		expect(await menuItems(wrapper)).not.toContain('Unmatched aircraft')
+	})
+
+	it('shows the item when aircraft reference data exists', async () => {
+		listAircraftTypes.mockResolvedValue(loadedPage)
+		const wrapper = render()
+		expect(await menuItems(wrapper)).toContain('Unmatched aircraft')
+	})
+
+	it('hides the item when the filter is already active', async () => {
+		listAircraftTypes.mockResolvedValue(loadedPage)
+		routeHolder.query = { unmatchedAircraft: '1' }
+		const wrapper = render()
+		expect(await menuItems(wrapper)).not.toContain('Unmatched aircraft')
+	})
+
+	it('commits unmatchedAircraft=1 on click, preserving other keys', async () => {
+		listAircraftTypes.mockResolvedValue(loadedPage)
+		routeHolder.query = { airline: 'EY' }
+		const wrapper = render()
+		await flushPromises()
+		const item = wrapper.findAll('.action-btn').find((b) => b.text() === 'Unmatched aircraft')!
+		await item.trigger('click')
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { airline: 'EY', unmatchedAircraft: '1' } })
+	})
+
+	/**
+	 * The two tables are imported independently, so each item must follow its own
+	 * probe — one loaded table must not light up the other's filter.
+	 */
+	it('tracks its own reference table, not the airport one', async () => {
+		listAirports.mockResolvedValue(loadedPage)
+		const wrapper = render()
+		const items = await menuItems(wrapper)
+		expect(items).toContain('Unmatched airports')
+		expect(items).not.toContain('Unmatched aircraft')
+	})
+
+	it('still offers itself when only the aircraft table is loaded', async () => {
+		listAircraftTypes.mockResolvedValue(loadedPage)
+		const wrapper = render()
+		const items = await menuItems(wrapper)
+		expect(items).toContain('Unmatched aircraft')
+		expect(items).not.toContain('Unmatched airports')
+	})
+
+	/**
+	 * A failing probe must not take the other one down with it — hence
+	 * Promise.allSettled rather than Promise.all.
+	 */
+	it('still offers itself when the airport probe fails', async () => {
+		listAirports.mockRejectedValue(new Error('boom'))
+		listAircraftTypes.mockResolvedValue(loadedPage)
+		const wrapper = render()
+		expect(await menuItems(wrapper)).toContain('Unmatched aircraft')
 	})
 })
 
