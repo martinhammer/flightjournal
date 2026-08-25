@@ -69,6 +69,85 @@ class AircraftTypeImportServiceTest extends TestCase {
 		$this->assertCount(1, $canonicals);
 	}
 
+	// ---- Stage 1: digit containment ------------------------------------------
+
+	/**
+	 * The case the digit filter exists for: shortest-name alone picked the
+	 * military "C-40" over the airliner, because a designator often also covers
+	 * unrelated types with shorter names.
+	 */
+	public function testDesignatorDigitsBeatAShorterUnrelatedName(): void {
+		$this->service->importCsv($this->csv(
+			'BOEING,C-40,B737,LandPlane,Jet,2,M',
+			'BOEING,737-700,B737,LandPlane,Jet,2,M',
+			'BOEING,737-700 BBJ,B737,LandPlane,Jet,2,M',
+			'BOEING,C-40 Clipper,B737,LandPlane,Jet,2,M',
+		));
+		$this->assertSame(['BOEING', '737-700'], $this->canonicalOf('B737'));
+	}
+
+	/**
+	 * "332" is not a *substring* of "330200" but is a subsequence — the reason
+	 * the comparison is ordered-subsequence rather than substring.
+	 */
+	public function testDigitsAreMatchedAsAnOrderedSubsequence(): void {
+		$this->service->importCsv($this->csv(
+			'AIRBUS,T-24,A332,LandPlane,Jet,2,H',
+			'AIRBUS,A-330-200,A332,LandPlane,Jet,2,H',
+			'AIRBUS,A-330-200 Prestige,A332,LandPlane,Jet,2,H',
+			'AIRBUS,A-330-MRTT,A332,LandPlane,Jet,2,H',
+			'AIRBUS,KC-30,A332,LandPlane,Jet,2,H',
+		));
+		// A-330-MRTT has digits "330" and so fails on the trailing 2.
+		$this->assertSame(['AIRBUS', 'A-330-200'], $this->canonicalOf('A332'));
+	}
+
+	public function testDigitFilterAlsoFixesTheRegionalJetCase(): void {
+		$this->service->importCsv($this->csv(
+			'CANADAIR,CL-600 Challenger 890,CRJ9,LandPlane,Jet,2,M',
+			'CANADAIR,CL-600 Regional Jet CRJ-705,CRJ9,LandPlane,Jet,2,M',
+			'CANADAIR,CL-600 Regional Jet CRJ-900,CRJ9,LandPlane,Jet,2,M',
+		));
+		$this->assertSame(['CANADAIR', 'CL-600 Regional Jet CRJ-900'], $this->canonicalOf('CRJ9'));
+	}
+
+	/**
+	 * A filter may narrow the field but never empty it — otherwise a designator
+	 * whose models all fail the digit test would have no default at all.
+	 */
+	public function testDigitFilterIsSkippedWhenNoModelCarriesTheDigits(): void {
+		$this->service->importCsv($this->csv(
+			'CESSNA,Skyhawk,X999,LandPlane,Piston,1,L',
+			'CESSNA,Skylane,X999,LandPlane,Piston,1,L',
+		));
+		$this->assertSame(['CESSNA', 'Skyhawk'], $this->canonicalOf('X999'));
+	}
+
+	public function testDigitFilterIsInertForALetterOnlyDesignator(): void {
+		$this->service->importCsv($this->csv(
+			'SCHEMPP-HIRTH,Discus 2,GLID,LandPlane,Piston,1,L',
+			'SCHEMPP-HIRTH,Nimbus,GLID,LandPlane,Piston,1,L',
+		));
+		// No digits to match on, so the shortest name still wins.
+		$this->assertSame(['SCHEMPP-HIRTH', 'Nimbus'], $this->canonicalOf('GLID'));
+	}
+
+	/**
+	 * Filter order is load-bearing for exactly this designator: `CC-` is in the
+	 * derivative list for the CC-138 Twin Otter and falsely flags Cub Crafters.
+	 * Filtering on digits first keeps the correct model; demoting first would
+	 * strand the group on "CCK-1865 Carbon Cub".
+	 */
+	public function testDigitFilterRunsBeforeDerivativeDemotion(): void {
+		$this->service->importCsv($this->csv(
+			'CUB CRAFTERS,CC-11 Sport Cub,CC11,LandPlane,Piston,1,L',
+			'CUB CRAFTERS,CCK-1865 Carbon Cub,CC11,LandPlane,Piston,1,L',
+		));
+		$this->assertSame(['CUB CRAFTERS', 'CC-11 Sport Cub'], $this->canonicalOf('CC11'));
+	}
+
+	// ---- Stages 2-4 ----------------------------------------------------------
+
 	public function testShortestModelWinsTheCanonicalSlot(): void {
 		$this->service->importCsv($this->csv(
 			'BOEING,737-800 BBJ2,B738,LandPlane,Jet,2,M',

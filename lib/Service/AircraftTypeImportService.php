@@ -31,6 +31,9 @@ class AircraftTypeImportService {
 	 * actually flew: without this B789 resolves to "787-9 BBJ" rather than
 	 * "787-9 Dreamliner", and AT76 to the maritime-patrol "ATR P-72" rather than
 	 * "ATR-72-600". Only 83 of 7,388 source rows match.
+	 *
+	 * Known false positive: `CC-` (for the CC-138 Twin Otter) also flags Cub
+	 * Crafters' CC-11. See pickCanonical() for why filter order neutralises it.
 	 */
 	private const DERIVATIVE_MARKERS = '/\b(BBJ|ACJ|Prestige|Lineage|VIP|Elite|Challenger|CC-|UV-|P-72)/i';
 
@@ -162,18 +165,33 @@ class AircraftTypeImportService {
 	/**
 	 * Index of the row a bare designator should resolve to.
 	 *
+	 * Two filters narrow the group, then rankKey() sorts what survives:
+	 *
+	 *   1. Digit containment — the designator encodes its model number, so keep
+	 *      only models carrying it (see matchesDesignatorDigits).
+	 *   2. Derivative demotion — drop the corporate/military variants.
+	 *
+	 * Both filters share one invariant: they never eliminate every candidate. A
+	 * filter that would empty the set is skipped for that designator, so there is
+	 * always a default.
+	 *
+	 * Filter order matters for exactly one designator in the DOC 8643 data, and
+	 * digits-first is the correct order there: CC11 (Cub Crafters) yields
+	 * "CC-11 Sport Cub" rather than "CCK-1865 Carbon Cub", because the `CC-`
+	 * marker — meant for the CC-138 Twin Otter military designation — falsely
+	 * flags Cub Crafters. Filtering on digits first shields against that.
+	 *
 	 * @param list<array<string, string>> $group
 	 */
 	private function pickCanonical(array $group): int {
-		// Prefer non-derivative rows, but never eliminate every candidate: a
-		// designator whose models are *all* derivatives still needs a default.
-		$candidates = array_filter(
+		$candidates = $this->narrow(
 			$group,
+			fn (array $row): bool => $this->matchesDesignatorDigits($row),
+		);
+		$candidates = $this->narrow(
+			$candidates,
 			fn (array $row): bool => preg_match(self::DERIVATIVE_MARKERS, $row['model']) !== 1,
 		);
-		if ($candidates === []) {
-			$candidates = $group;
-		}
 
 		// array_filter preserves keys, so $index indexes back into $group.
 		$bestIndex = 0;
@@ -189,18 +207,78 @@ class AircraftTypeImportService {
 	}
 
 	/**
-	 * Sort key deciding the canonical model within a designator: shortest model
-	 * name wins, with (manufacturer, model) as a deterministic final tiebreak.
+	 * Apply a candidate filter, but keep the set unchanged when nothing passes —
+	 * a designator always needs a default, so a filter may narrow the field but
+	 * never empty it.
+	 *
+	 * @param array<int, array<string, string>> $candidates
+	 * @param callable(array<string, string>): bool $keep
+	 * @return array<int, array<string, string>>
+	 */
+	private function narrow(array $candidates, callable $keep): array {
+		$filtered = array_filter($candidates, $keep);
+		return $filtered === [] ? $candidates : $filtered;
+	}
+
+	/**
+	 * Whether a model carries the model number encoded in its ICAO designator.
+	 *
+	 * A designator spells out the aircraft it names — B737 → 737-700, A332 →
+	 * A330-*2*00, B738 → 737-*8*00, A359 → A350-*9*00 — so the designator's
+	 * digits are a strong signal for which of its models is the base type. Both
+	 * sides are reduced to digits and compared as an ordered *subsequence*:
+	 * "332" is not a substring of "330200", but it is a subsequence, which is
+	 * exactly the A332 case this exists to get right.
+	 *
+	 * Without it the shortest-name rule picks whatever unrelated short name the
+	 * designator happens to also cover: B737 resolved to the military "C-40" and
+	 * A332 to "T-24". Measured against the OpenFlights list of types passengers
+	 * actually fly, this lifts the correct pick from 102/157 to 132/157 with no
+	 * regressions.
+	 *
+	 * Vacuously true for a designator with no digits (GLID, BALL), which leaves
+	 * those groups to the later stages.
+	 *
+	 * @param array<string, string> $row
+	 */
+	private function matchesDesignatorDigits(array $row): bool {
+		$needle = $this->digitsOf($row['type_designator']);
+		if ($needle === '') {
+			return true;
+		}
+		$haystack = $this->digitsOf($row['model']);
+
+		$offset = 0;
+		$length = strlen($haystack);
+		foreach (str_split($needle) as $digit) {
+			while ($offset < $length && $haystack[$offset] !== $digit) {
+				$offset++;
+			}
+			if ($offset === $length) {
+				return false;
+			}
+			$offset++;
+		}
+		return true;
+	}
+
+	private function digitsOf(string $value): string {
+		return (string)preg_replace('/\D+/', '', $value);
+	}
+
+	/**
+	 * Sorts whatever survives pickCanonical()'s filters: shortest model name
+	 * wins, with (manufacturer, model) as a deterministic final tiebreak.
 	 *
 	 * The tiebreak is not cosmetic — shortest-model alone ties in 685 of the
 	 * 1,377 multi-row designators (480 of those across different manufacturers),
 	 * so without it the pick would depend on file order and could silently flip
 	 * between imports.
 	 *
-	 * This rule is deliberately simple and is known to be imperfect: CRJ9 lands
-	 * on "CL-600 Regional Jet CRJ-705" rather than CRJ-900, and E190 on the bare
-	 * "190". No automatic rule gets every airliner right, which is why the model
-	 * is overridable per flight rather than being baked in here.
+	 * Still imperfect even after the digit filter: E190 lands on the bare "190",
+	 * because both it and "ERJ-190-100" carry the digits and length then favours
+	 * the shorter. No automatic rule gets every airliner right, which is why the
+	 * model is overridable per flight rather than being baked in here.
 	 *
 	 * @param array<string, string> $row
 	 * @return list<string|int>

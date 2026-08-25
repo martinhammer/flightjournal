@@ -109,7 +109,17 @@ No IATA tier: the column exists but the IATA overlay is deliberately not importe
 
 **Why the reference table is at model grain.** In DOC 8643 a designator maps to many models — 1,377 of 2,688 designators have more than one (B738 is both the 737-800 and the 737-800 BBJ2). Collapsing at import would discard exactly the rows a disambiguation UI needs, so every row is kept and one per designator is flagged `canonical`. `(manufacturer, model)` is the unique key because `model` alone fails to identify a row within its designator for 629 designators.
 
-**Canonical ranking** (`AircraftTypeImportService::pickCanonical`): demote corporate/military derivatives (BBJ, ACJ, Prestige, Lineage, VIP, Elite, Challenger, CC-, UV-, P-72 — only 83 of 7,388 rows) unless *every* candidate is one, then shortest model name, then alphabetical by `(manufacturer, model)`. The final tiebreak is load-bearing, not cosmetic: shortest-model alone ties in 685 of the 1,377 ambiguous designators, so without it the pick would follow file order and could silently flip between imports. Verified: 0 of 2,688 picks change when the input is shuffled. The rule is knowingly imperfect (CRJ9 → "CL-600 Regional Jet CRJ-705" not CRJ-900; E190 → the bare "190") — no automatic rule gets every airliner right, which is why the model is meant to be overridable per flight rather than baked in.
+**Canonical ranking** (`AircraftTypeImportService::pickCanonical`) — two filters, then a sort:
+
+1. **Digit containment.** A designator encodes its model number (B737 → 737-700, A332 → A3**3**0-**2**00, B738 → 737-**8**00), so keep only models whose digits contain the designator's digits as an **ordered subsequence**. Subsequence, not substring: "332" is not a substring of "330200" but is a subsequence — exactly the A332 case. Vacuous for letter-only designators (GLID, BALL).
+2. **Derivative demotion.** Drop `BBJ|ACJ|Prestige|Lineage|VIP|Elite|Challenger|CC-|UV-|P-72` (83 of 7,388 rows).
+3. **Shortest model name**, then 4. **alphabetical by `(manufacturer, model)`**.
+
+Both filters share one invariant: **they never eliminate every candidate** — a filter that would empty the set is skipped for that designator (digits find nothing for 15 designators, all-derivative for 4). Filter order is load-bearing for exactly one designator: `CC11` gives "CC-11 Sport Cub" digits-first but "CCK-1865 Carbon Cub" demote-first, because `CC-` (added for the CC-138 Twin Otter) falsely flags Cub Crafters — digits-first neutralises it.
+
+The alphabetical tiebreak is not cosmetic: shortest-model alone ties in 685 of the 1,377 ambiguous designators, so without it the pick would follow file order and could silently flip between imports. Verified: 0 of 2,688 picks change when the input is shuffled.
+
+Scored against the OpenFlights name list (the ~230 types passengers actually fly) as an independent oracle, the digit filter lifts correct picks from **102/157 to 132/157, with 30 improved and 0 regressed**; it changes 243 of 1,377 multi-model designators overall. Still imperfect — E190 lands on the bare "190" because both it and "ERJ-190-100" carry the digits — which is why the model is meant to be overridable per flight rather than baked in. **Changing this rule requires a re-import to take effect**, and is safe for user data: `reconcileAircraftAll` preserves a stored model that differs from the canonical one.
 
 **Divergence from airports on preservation:** an airport label is *overwritten* with the reference name on a match; `aircraft_type_raw` is **always preserved**. The resolved model lands in its own `aircraft_manufacturer` / `aircraft_model` columns alongside it.
 
