@@ -4,9 +4,10 @@ import { mount, flushPromises } from '@vue/test-utils'
 // Covers the search box wiring (catches the v8→v9 `:value`/`modelValue`
 // regression) and the per-row menu navigation to the Flights and Map views.
 
-const { listAirports, push } = vi.hoisted(() => ({
+const { listAirports, push, currentRoute } = vi.hoisted(() => ({
 	listAirports: vi.fn(),
 	push: vi.fn(),
+	currentRoute: { query: {} as Record<string, string> },
 }))
 
 vi.mock('../../src/api.ts', () => ({ listAirports }))
@@ -17,7 +18,10 @@ const { flightsStore } = vi.hoisted(() => ({
 }))
 vi.mock('../../src/store/flights.ts', () => ({ useFlightsStore: () => flightsStore }))
 
-vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
+vi.mock('vue-router', () => ({
+	useRouter: () => ({ push }),
+	useRoute: () => currentRoute,
+}))
 
 import ViewAirports from '../../src/views/ViewAirports.vue'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
@@ -62,6 +66,7 @@ const lhr = {
 }
 
 beforeEach(() => {
+	currentRoute.query = {}
 	flightsStore.flights = []
 	flightsStore.loaded = true
 	flightsStore.fetchAll.mockClear()
@@ -78,7 +83,22 @@ describe('ViewAirports search', () => {
 	it('fetches the first page on mount, restricted to flown airports', async () => {
 		mount(ViewAirports, { global: { stubs } })
 		await flushPromises()
-		expect(listAirports).toHaveBeenLastCalledWith('', 100, 0, true)
+		expect(listAirports).toHaveBeenCalledWith('', 100, 0, true)
+	})
+
+	/**
+	 * The drill-through from the Map view's marker popup, which sends the canonical
+	 * code as `?q=`. The first page has to be fetched already filtered — a seeded
+	 * box that still lists every flown airport would look broken — and the term has
+	 * to reach the search field so the user can see and clear it.
+	 */
+	it('seeds the search from the route query on mount', async () => {
+		currentRoute.query = { q: 'KEF' }
+		const wrapper = mount(ViewAirports, { global: { stubs: { ...stubs, NcTextField } } })
+		await flushPromises()
+
+		expect(listAirports).toHaveBeenCalledWith('KEF', 100, 0, true)
+		expect(wrapper.findComponent(NcTextField).props('modelValue')).toBe('KEF')
 	})
 
 	it('queries the backend with the typed search term', async () => {
@@ -92,6 +112,26 @@ describe('ViewAirports search', () => {
 		await flushPromises()
 
 		expect(listAirports).toHaveBeenLastCalledWith('LHR', 100, 0, true)
+	})
+})
+
+describe('ViewAirports summary', () => {
+	// The two numbers must come from the two list modes, not from the page the
+	// view happens to be showing — otherwise searching or paging changes them.
+	it('reports visited and total counts from their own unfiltered queries', async () => {
+		listAirports.mockImplementation((q: string, limit: number, offset: number, flownOnly: boolean) => {
+			if (limit === 100) return Promise.resolve(pageWith(lhr))
+			return Promise.resolve({ ...emptyPage, total: flownOnly ? 20 : 25000 })
+		})
+
+		const wrapper = mount(ViewAirports, { global: { stubs } })
+		await flushPromises()
+
+		expect(listAirports).toHaveBeenCalledWith('', 1, 0, true)
+		expect(listAirports).toHaveBeenCalledWith('', 1, 0, false)
+		expect(wrapper.find('.summary').text()).toBe(
+			`${(20).toLocaleString()} visited / ${(25000).toLocaleString()} total`,
+		)
 	})
 })
 

@@ -77,6 +77,26 @@ describe('ViewAircraftTypes', () => {
 		expect(listAircraftTypes).toHaveBeenCalledWith('', 100, 0, true)
 	})
 
+	/**
+	 * The two numbers have to come from the two list modes, not from whatever page
+	 * the view is showing — otherwise a search or a page turn would change them.
+	 */
+	it('summarises flown and total counts from their own unfiltered queries', async () => {
+		listAircraftTypes.mockImplementation((q: string, limit: number, offset: number, flownOnly: boolean) => {
+			if (limit === 100) return Promise.resolve(page([b738]))
+			return Promise.resolve({ items: [], total: flownOnly ? 13 : 7000, limit, offset })
+		})
+
+		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
+		await flushPromises()
+
+		expect(listAircraftTypes).toHaveBeenCalledWith('', 1, 0, true)
+		expect(listAircraftTypes).toHaveBeenCalledWith('', 1, 0, false)
+		expect(wrapper.find('.summary').text()).toBe(
+			`${(13).toLocaleString()} flown / ${(7000).toLocaleString()} total`,
+		)
+	})
+
 	it('switches to the full reference when "Show all" is toggled', async () => {
 		const wrapper = mount(ViewAircraftTypes, { global: { stubs } })
 		await flushPromises()

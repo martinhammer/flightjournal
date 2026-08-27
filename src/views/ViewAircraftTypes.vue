@@ -53,8 +53,36 @@ async function fetchPage() {
 const flightCounts = computed(() => countByAircraft(store.flights))
 const flightCount = (t: AircraftType) => flightCounts.value.get((typeName(t) ?? '').toUpperCase()) ?? 0
 
+// Headline summary: how many reference models the user has flown out of the
+// whole table. Both numbers come from the server rather than the store, so each
+// is exactly the size of the list the corresponding "Show all" mode shows (an
+// unresolved or half-reconciled leg matches no reference row, so it is in
+// neither). Deliberately independent of the search box and the switch — the
+// pager already reports what the current query returns.
+const flownTotal = ref<number | null>(null)
+const referenceTotal = ref<number | null>(null)
+
+const summary = computed(() => {
+	if (flownTotal.value === null || referenceTotal.value === null) return ''
+	return `${flownTotal.value.toLocaleString()} flown / ${referenceTotal.value.toLocaleString()} total`
+})
+
+async function fetchTotals() {
+	try {
+		const [flown, all] = await Promise.all([
+			listAircraftTypes('', 1, 0, true),
+			listAircraftTypes('', 1, 0, false),
+		])
+		flownTotal.value = flown.total
+		referenceTotal.value = all.total
+	} catch {
+		// Non-critical decoration; the list itself surfaces a load failure.
+	}
+}
+
 onMounted(async () => {
 	fetchPage()
+	fetchTotals()
 	if (!store.loaded) await store.fetchAll()
 })
 
@@ -126,12 +154,15 @@ function showFlights(t: AircraftType) {
 	<div class="view-aircraft-types">
 		<h2>Aircraft types</h2>
 		<div class="controls">
-			<NcCheckboxRadioSwitch
-				:model-value="showAll"
-				type="switch"
-				@update:model-value="showAll = Boolean($event)">
-				Show all aircraft types
-			</NcCheckboxRadioSwitch>
+			<div class="switch-row">
+				<NcCheckboxRadioSwitch
+					:model-value="showAll"
+					type="switch"
+					@update:model-value="showAll = Boolean($event)">
+					Show all aircraft types
+				</NcCheckboxRadioSwitch>
+				<span v-if="summary" class="summary">{{ summary }}</span>
+			</div>
 			<NcTextField
 				:model-value="query"
 				label="Search"
@@ -173,7 +204,7 @@ function showFlights(t: AircraftType) {
 						<td>{{ t.manufacturer ?? '' }}</td>
 						<td>
 							{{ t.model ?? '' }}
-							<span v-if="t.canonical" class="default-badge" title="The model a bare type designator resolves to">default</span>
+							<span v-if="t.canonical" class="default-badge" title="Several models can share one ICAO code, this is the default one for this code">default</span>
 						</td>
 						<td>{{ t.description ?? '' }}</td>
 						<td>{{ engines(t) }}</td>
@@ -212,6 +243,17 @@ function showFlights(t: AircraftType) {
 <style scoped>
 .view-aircraft-types {
 	padding: 16px;
+}
+
+.switch-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 20px;
+}
+
+.summary {
+	color: var(--color-text-maxcontrast);
 }
 
 .controls {

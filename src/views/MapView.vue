@@ -223,6 +223,20 @@ function airportPopup(a: Airport): HTMLElement {
 		})
 		el.appendChild(btn)
 	}
+
+	// Leaves the Map view, unlike the three above — the reference row for this
+	// airport, reached through the Airports view's own search. Sending the code
+	// rather than the name because `q` matches IATA/ICAO exactly, and because the
+	// search box then shows something the user can recognise and clear.
+	const details = document.createElement('button')
+	details.type = 'button'
+	details.className = 'fj-map-popup__action'
+	details.textContent = `View ${code} details`
+	details.addEventListener('click', () => {
+		router.push({ name: 'airports', query: { q: code } })
+	})
+	el.appendChild(details)
+
 	return el
 }
 

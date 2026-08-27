@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
@@ -18,12 +18,17 @@ import { useFlightsStore } from '../store/flights.ts'
 import { countByAirport } from '../flightCounts.ts'
 import type { Airport } from '../types.ts'
 
+const route = useRoute()
 const router = useRouter()
 const store = useFlightsStore()
 
 const PAGE_SIZE = 100
 
-const query = ref('')
+// Seeded from `?q=` so another view can drill through to one airport — the Map
+// view's marker popup does, sending the canonical code. Read once on setup
+// rather than watched: typing in the box deliberately does not write back to the
+// URL, so nothing can change the query while this view is mounted.
+const query = ref(String(route.query.q ?? ''))
 // Default: only airports the current user has flown to/from.
 const showAll = ref(false)
 const offset = ref(0)
@@ -57,8 +62,36 @@ async function fetchPage() {
 const flightCounts = computed(() => countByAirport(store.flights))
 const flightCount = (a: Airport) => flightCounts.value.get((canonicalCode(a) ?? '').toUpperCase()) ?? 0
 
+// Headline summary: how many airports the user has visited out of the whole
+// reference table. Both numbers come from the server rather than the store, so
+// each is exactly the size of the list the corresponding "Show all" mode shows
+// (a flown code with no reference row is in neither). Deliberately independent
+// of the search box and the switch — the pager already reports what the current
+// query returns.
+const visitedTotal = ref<number | null>(null)
+const referenceTotal = ref<number | null>(null)
+
+const summary = computed(() => {
+	if (visitedTotal.value === null || referenceTotal.value === null) return ''
+	return `${visitedTotal.value.toLocaleString()} visited / ${referenceTotal.value.toLocaleString()} total`
+})
+
+async function fetchTotals() {
+	try {
+		const [visited, all] = await Promise.all([
+			listAirports('', 1, 0, true),
+			listAirports('', 1, 0, false),
+		])
+		visitedTotal.value = visited.total
+		referenceTotal.value = all.total
+	} catch {
+		// Non-critical decoration; the list itself surfaces a load failure.
+	}
+}
+
 onMounted(async () => {
 	fetchPage()
+	fetchTotals()
 	if (!store.loaded) await store.fetchAll()
 })
 
@@ -131,12 +164,15 @@ function showOnMap(a: Airport) {
 	<div class="view-airports">
 		<h2>Airports</h2>
 		<div class="controls">
-			<NcCheckboxRadioSwitch
-				:model-value="showAll"
-				type="switch"
-				@update:model-value="showAll = Boolean($event)">
-				Show all airports
-			</NcCheckboxRadioSwitch>
+			<div class="switch-row">
+				<NcCheckboxRadioSwitch
+					:model-value="showAll"
+					type="switch"
+					@update:model-value="showAll = Boolean($event)">
+					Show all airports
+				</NcCheckboxRadioSwitch>
+				<span v-if="summary" class="summary">{{ summary }}</span>
+			</div>
 			<NcTextField
 				:model-value="query"
 				label="Search"
@@ -232,6 +268,17 @@ function showOnMap(a: Airport) {
 <style scoped>
 .view-airports {
 	padding: 16px;
+}
+
+.switch-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 20px;
+}
+
+.summary {
+	color: var(--color-text-maxcontrast);
 }
 
 .controls {
