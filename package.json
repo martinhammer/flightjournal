@@ -29,7 +29,7 @@
     "leaflet": "^1.9.4",
     "leaflet.geodesic": "^2.7.2",
     "pinia": "^4.0.3",
-    "proj4": "^2.21.0",
+    "proj4": "^2.22.0",
     "proj4leaflet": "^1.0.2",
     "topojson-client": "^3.1.0",
     "vue": "^3.5.41",
