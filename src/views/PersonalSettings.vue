@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
 import { showConfirmation, showError, showSuccess } from '@nextcloud/dialogs'
+import { ocsErrorMessage } from '../ocsError.ts'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
@@ -82,9 +83,7 @@ async function runImport() {
 		)
 		payload = res.data
 	} catch (e: unknown) {
-		const message = (e as { response?: { data?: { ocs?: { meta?: { message?: string } } } } })
-			?.response?.data?.ocs?.meta?.message ?? 'Import failed'
-		showError(message)
+		showError(ocsErrorMessage(e, 'Import failed'))
 		importing.value = false
 		return
 	}
@@ -153,9 +152,7 @@ async function runJsonImport() {
 		)
 		payload = res.data
 	} catch (e: unknown) {
-		const message = (e as { response?: { data?: { ocs?: { meta?: { message?: string } } } } })
-			?.response?.data?.ocs?.meta?.message ?? 'Import failed'
-		showError(message)
+		showError(ocsErrorMessage(e, 'Import failed'))
 		importingJson.value = false
 		return
 	}

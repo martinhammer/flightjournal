@@ -7,6 +7,7 @@ import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess } from '@nextcloud/dialogs'
+import { ocsErrorMessage } from '../ocsError.ts'
 import { useFlightsStore } from '../store/flights.ts'
 import AircraftTypeField from './AircraftTypeField.vue'
 import AirportResolution from './AirportResolution.vue'
@@ -204,12 +205,6 @@ function close() {
 	emit('update:open', false)
 }
 
-function errorMessage(e: unknown): string {
-	const ocs = (e as { response?: { data?: { ocs?: { meta?: { message?: string }; data?: { message?: string } } } } })
-		?.response?.data?.ocs
-	return ocs?.data?.message || ocs?.meta?.message || 'Failed to update flights'
-}
-
 async function apply() {
 	if (!canApply.value) return
 	saving.value = true
@@ -219,7 +214,7 @@ async function apply() {
 		emit('saved')
 		close()
 	} catch (e: unknown) {
-		showError(errorMessage(e))
+		showError(ocsErrorMessage(e, 'Failed to update flights'))
 	} finally {
 		saving.value = false
 	}

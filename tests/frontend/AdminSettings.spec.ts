@@ -10,8 +10,13 @@ const { get, post, del } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), del:
 
 vi.mock('@nextcloud/axios', () => ({ default: { get, post, delete: del } }))
 
-import { showConfirmation } from '@nextcloud/dialogs'
+import { showConfirmation, showError } from '@nextcloud/dialogs'
 import AdminSettings from '../../src/views/AdminSettings.vue'
+
+/** A 400 exactly as the server renders our DataResponse(['message' => …]): meta.message is ''. */
+const serverError = (message: string) => ({
+	response: { data: { ocs: { meta: { status: 'failure', statuscode: 400, message: '' }, data: { message } } } },
+})
 
 const NcButton = {
 	props: ['disabled'],
@@ -114,5 +119,24 @@ describe('AdminSettings reference data', () => {
 		await flushPromises()
 
 		expect(del).not.toHaveBeenCalled()
+	})
+})
+
+describe('AdminSettings import failure', () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		get.mockResolvedValue({ data: { ocs: { data: { count: 0 } } } })
+	})
+
+	it('shows why the server rejected the file', async () => {
+		post.mockRejectedValueOnce(serverError('Missing required column: type_designator'))
+		const wrapper = mount(AdminSettings, { global: { stubs } })
+		await flushPromises()
+
+		await pickFile(wrapper, 1, 'manufacturer,model\n', 'aircraft.csv')
+		await buttonByText(wrapper, 'Import aircraft types').trigger('click')
+		await flushPromises()
+
+		expect(showError).toHaveBeenCalledWith('Missing required column: type_designator')
 	})
 })

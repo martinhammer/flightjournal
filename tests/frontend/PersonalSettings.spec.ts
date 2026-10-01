@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { showError } from '@nextcloud/dialogs'
 
 // Covers the JSON backup/restore wiring added alongside the legacy markdown
 // import/export: restore POSTs the file contents with dataformat 'json', and
@@ -10,6 +11,11 @@ const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('@nextcloud/axios', () => ({ default: { get, post, delete: vi.fn() } }))
 
 import PersonalSettings from '../../src/views/PersonalSettings.vue'
+
+/** A 400 exactly as the server renders our DataResponse(['message' => …]): meta.message is ''. */
+const serverError = (message: string) => ({
+	response: { data: { ocs: { meta: { status: 'failure', statuscode: 400, message: '' }, data: { message } } } },
+})
 
 // Slot-rendering NcButton so we can click controls by their label text.
 const NcButton = {
@@ -124,5 +130,49 @@ describe('PersonalSettings JSON backup/restore', () => {
 		expect(url).toContain('/api/v1/import')
 		expect(body).toMatchObject({ dataformat: 'markdown' })
 		expect(body).not.toHaveProperty('replace')
+	})
+})
+
+describe('PersonalSettings import failures', () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it('shows why a JSON restore was rejected', async () => {
+		post.mockRejectedValueOnce(serverError('Invalid JSON: Syntax error'))
+		const wrapper = mount(PersonalSettings, { global: { stubs } })
+
+		const file = new File(['{oops'], 'backup.json', { type: 'application/json' })
+		const input = wrapper.find('input[type="file"]')
+		Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+		await input.trigger('change')
+		await buttonByText(wrapper, 'Restore from JSON').trigger('click')
+		await flushPromises()
+
+		expect(showError).toHaveBeenCalledWith('Invalid JSON: Syntax error')
+	})
+
+	it('shows why a markdown import was rejected', async () => {
+		post.mockRejectedValueOnce(serverError('Content is empty'))
+		const wrapper = mount(PersonalSettings, { global: { stubs } })
+
+		await buttonByText(wrapper, 'Import from markdown…').trigger('click')
+		await wrapper.find('textarea.md-content').setValue('| x |')
+		await buttonByText(wrapper, 'Import').trigger('click')
+		await flushPromises()
+
+		expect(showError).toHaveBeenCalledWith('Content is empty')
+	})
+
+	it('falls back to a generic message when the request fails without one', async () => {
+		post.mockRejectedValueOnce(new Error('Network Error'))
+		const wrapper = mount(PersonalSettings, { global: { stubs } })
+
+		await buttonByText(wrapper, 'Import from markdown…').trigger('click')
+		await wrapper.find('textarea.md-content').setValue('| x |')
+		await buttonByText(wrapper, 'Import').trigger('click')
+		await flushPromises()
+
+		expect(showError).toHaveBeenCalledWith('Import failed')
 	})
 })

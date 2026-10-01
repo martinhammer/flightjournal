@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { showError } from '@nextcloud/dialogs'
 
 // Catches the v8→v9 NcButton regression: the Save control relies on being a
 // native submit button (the form submits via `@submit.prevent`, the button has
@@ -40,6 +41,11 @@ vi.mock('vue-router', async (importOriginal) => ({
 }))
 
 import EditFlightLog from '../../src/views/EditFlightLog.vue'
+
+/** A 400 exactly as the server renders our DataResponse(['message' => …]): meta.message is ''. */
+const serverError = (message: string) => ({
+	response: { data: { ocs: { meta: { status: 'failure', statuscode: 400, message: '' }, data: { message } } } },
+})
 
 const flight = {
 	id: 1,
@@ -166,5 +172,17 @@ describe('EditFlightLog save', () => {
 			aircraftManufacturer: null,
 			aircraftModel: null,
 		}))
+	})
+})
+
+describe('EditFlightLog save failure', () => {
+	it('shows the server\'s validation message, not a blank toast', async () => {
+		store.update.mockRejectedValueOnce(serverError('flightDate must be YYYY-MM-DD'))
+		const wrapper = await mountLoaded()
+		await wrapper.find('form').trigger('submit')
+		await flushPromises()
+
+		expect(showError).toHaveBeenCalledWith('flightDate must be YYYY-MM-DD')
+		expect(push).not.toHaveBeenCalled()
 	})
 })

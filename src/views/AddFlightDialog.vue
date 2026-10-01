@@ -6,6 +6,7 @@ import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNa
 import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
+import { ocsErrorMessage } from '../ocsError.ts'
 import { useFlightsStore } from '../store/flights.ts'
 import AircraftTypeField from '../components/AircraftTypeField.vue'
 import { CABIN_CLASSES, withAircraftSelection, type AircraftSelection, type FlightInput } from '../types.ts'
@@ -88,9 +89,7 @@ async function add() {
 		showSuccess('Flight added')
 		close()
 	} catch (e: unknown) {
-		const message = (e as { response?: { data?: { ocs?: { meta?: { message?: string } } } } })
-			?.response?.data?.ocs?.meta?.message ?? 'Failed to save flight'
-		showError(message)
+		showError(ocsErrorMessage(e, 'Failed to save flight'))
 	} finally {
 		saving.value = false
 	}

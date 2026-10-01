@@ -15,6 +15,7 @@ import { onMounted, ref, useTemplateRef } from 'vue'
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
 import { showConfirmation, showError, showSuccess } from '@nextcloud/dialogs'
+import { ocsErrorMessage } from '../ocsError.ts'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcSettingsSection from '@nextcloud/vue/components/NcSettingsSection'
@@ -129,9 +130,7 @@ async function runImport() {
 		)
 		payload = res.data
 	} catch (e: unknown) {
-		const message = (e as { response?: { data?: { ocs?: { meta?: { message?: string } } } } })
-			?.response?.data?.ocs?.meta?.message ?? `${props.importLabel} failed`
-		showError(message)
+		showError(ocsErrorMessage(e, `${props.importLabel} failed`))
 		importing.value = false
 		return
 	}
