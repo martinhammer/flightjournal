@@ -12,6 +12,16 @@ use OCP\AppFramework\Utility\ITimeFactory;
 class FlightService {
 	private const ALLOWED_CABIN_CLASSES = ['economy', 'premium_economy', 'business', 'first', 'other'];
 
+	/**
+	 * Fields a bulk update may set. The rest — date, seat, notes — describe one
+	 * leg, so setting them to the same value across many makes no sense.
+	 */
+	private const BULK_KEYS = [
+		'cabinClass', 'airlineCode', 'flightNumber', 'registration',
+		'originLabel', 'destinationLabel',
+		'aircraftTypeRaw', 'aircraftTypeCode', 'aircraftManufacturer', 'aircraftModel',
+	];
+
 	/** @psalm-suppress PossiblyUnusedMethod */
 	public function __construct(
 		private FlightMapper $mapper,
@@ -127,6 +137,151 @@ class FlightService {
 		}
 		$flight->setUpdatedAt($this->time->getTime());
 		return $this->mapper->update($flight);
+	}
+
+	/**
+	 * Apply one set of changes to many flights, all-or-nothing.
+	 *
+	 * Patch semantics: a key present in $changes is set (null clears it), an
+	 * absent key is left alone. Every id is looked up before anything is written,
+	 * so an id that isn't the user's fails the batch with nothing changed, and the
+	 * writes share one transaction.
+	 *
+	 * Deliberately not a loop over update(), which replaces the whole row from its
+	 * input. Feeding it each stored row with the changes merged in fails twice
+	 * over: stored codes would arrive as explicit client codes, whose branch drops
+	 * the coordinates and so wipes distance_km (and pins a stale aircraft type over
+	 * an edited raw text); and with the codes nulled instead, an endpoint stored as
+	 * a code with no label (a restored backup) no longer passes validation. Only
+	 * the fields being changed are touched here, through the same resolvers.
+	 *
+	 * @param array<array-key, mixed> $ids
+	 * @param array<array-key, mixed> $changes
+	 * @return list<Flight>
+	 */
+	public function bulkUpdate(string $userId, array $ids, array $changes): array {
+		$ids = $this->bulkIds($ids);
+		$this->validateBulkChanges($changes);
+		$flights = array_map(fn (int $id): Flight => $this->find($id, $userId), $ids);
+
+		return $this->mapper->transactional(function () use ($flights, $changes): array {
+			$now = $this->time->getTime();
+			$updated = [];
+			foreach ($flights as $flight) {
+				$this->applyBulkChanges($flight, $changes);
+				$flight->setUpdatedAt($now);
+				$updated[] = $this->mapper->update($flight);
+			}
+			return $updated;
+		});
+	}
+
+	/**
+	 * @param array<array-key, mixed> $ids
+	 * @return list<int>
+	 */
+	private function bulkIds(array $ids): array {
+		if ($ids === []) {
+			throw new ValidationException('No flights selected');
+		}
+		foreach ($ids as $id) {
+			if (!is_int($id)) {
+				throw new ValidationException('ids must be a list of flight ids');
+			}
+		}
+		/** @var list<int> */
+		return array_values(array_unique($ids));
+	}
+
+	/**
+	 * @param array<array-key, mixed> $changes
+	 */
+	private function validateBulkChanges(array $changes): void {
+		if ($changes === []) {
+			throw new ValidationException('No changes given');
+		}
+		/** @var mixed $value */
+		foreach ($changes as $key => $value) {
+			if (!in_array($key, self::BULK_KEYS, true)) {
+				throw new ValidationException("$key cannot be bulk-edited");
+			}
+			if ($value !== null && !is_string($value)) {
+				throw new ValidationException("$key must be a string or null");
+			}
+		}
+		// Required on every flight, so a bulk change may replace them but not clear them.
+		if (array_key_exists('originLabel', $changes) && $this->str($changes, 'originLabel') === null) {
+			throw new ValidationException('Origin is required');
+		}
+		if (array_key_exists('destinationLabel', $changes) && $this->str($changes, 'destinationLabel') === null) {
+			throw new ValidationException('Destination is required');
+		}
+		$cabin = $this->str($changes, 'cabinClass');
+		if ($cabin !== null && !in_array($cabin, self::ALLOWED_CABIN_CLASSES, true)) {
+			throw new ValidationException('Invalid cabinClass');
+		}
+		$hasReferenceModel = $this->str($changes, 'aircraftManufacturer') !== null || $this->str($changes, 'aircraftModel') !== null;
+		if ($hasReferenceModel && $this->str($changes, 'aircraftTypeCode') === null) {
+			throw new ValidationException('aircraftManufacturer and aircraftModel require aircraftTypeCode');
+		}
+	}
+
+	/**
+	 * Write the changed fields onto one flight. Untouched fields — including the
+	 * reconciled columns of an untouched endpoint or aircraft — are never read
+	 * back through a resolver, so they cannot drift.
+	 *
+	 * @param array<array-key, mixed> $changes
+	 */
+	private function applyBulkChanges(Flight $flight, array $changes): void {
+		if (array_key_exists('cabinClass', $changes)) {
+			$flight->setCabinClass($this->str($changes, 'cabinClass'));
+		}
+		if (array_key_exists('airlineCode', $changes)) {
+			$flight->setAirlineCode($this->upper($this->str($changes, 'airlineCode')));
+		}
+		if (array_key_exists('flightNumber', $changes)) {
+			$flight->setFlightNumber($this->str($changes, 'flightNumber'));
+		}
+		if (array_key_exists('registration', $changes)) {
+			$flight->setRegistration($this->str($changes, 'registration'));
+		}
+
+		$originChanged = array_key_exists('originLabel', $changes);
+		$destinationChanged = array_key_exists('destinationLabel', $changes);
+		if ($originChanged || $destinationChanged) {
+			// The untouched side is passed its own stored label, which takes
+			// resolveEndpointForUpdate's preserve path: code and label kept, and
+			// coordinates looked up from the stored code for the new distance.
+			[$oLabel, $oCode, $oLat, $oLon, $oKept] = $this->resolveEndpointForUpdate(
+				['originLabel' => $originChanged ? $changes['originLabel'] : $flight->getOriginLabel()],
+				'originLabel', 'originCode', $flight->getOriginLabel(), $flight->getOriginCode());
+			[$dLabel, $dCode, $dLat, $dLon, $dKept] = $this->resolveEndpointForUpdate(
+				['destinationLabel' => $destinationChanged ? $changes['destinationLabel'] : $flight->getDestinationLabel()],
+				'destinationLabel', 'destinationCode', $flight->getDestinationLabel(), $flight->getDestinationCode());
+			$flight->setOriginLabel($oLabel);
+			$flight->setOriginCode($oCode);
+			$flight->setDestinationLabel($dLabel);
+			$flight->setDestinationCode($dCode);
+			if (!($oKept && $dKept)) {
+				$flight->setDistanceKm($this->distanceKm($oLat, $oLon, $dLat, $dLon));
+			}
+		}
+
+		if ($this->str($changes, 'aircraftTypeCode') !== null) {
+			// A pick from the reference data: the triple is honoured verbatim, and
+			// each leg keeps its own typed text unless the change sets one too.
+			$this->applyAircraft($flight, $this->resolveAircraft(
+				$changes + ['aircraftTypeRaw' => $flight->getAircraftTypeRaw()]));
+		} elseif (array_key_exists('aircraftTypeRaw', $changes)) {
+			$raw = $this->str($changes, 'aircraftTypeRaw');
+			// Clearing is an explicit instruction here, so it bypasses update()'s
+			// preserve rule: a leg with a code but no raw text (a restored backup)
+			// would otherwise count as "unchanged" and keep its type.
+			$this->applyAircraft($flight, $raw === null
+				? [null, null, null, null]
+				: $this->resolveAircraftForUpdate(['aircraftTypeRaw' => $raw], $flight));
+		}
 	}
 
 	/**

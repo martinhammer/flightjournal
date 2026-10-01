@@ -1,6 +1,6 @@
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
-import type { AircraftType, Airport, Flight, FlightInput } from './types.ts'
+import type { AircraftType, Airport, BulkChanges, Flight, FlightInput } from './types.ts'
 
 const url = (path: string) => {
 	const base = generateOcsUrl('apps/flightjournal' + path)
@@ -30,6 +30,18 @@ export async function createFlight(input: FlightInput): Promise<Flight> {
 
 export async function updateFlight(id: number, input: FlightInput): Promise<Flight> {
 	const res = await axios.put<OcsResponse<Flight>>(url(`/api/v1/flights/${id}`), input, config)
+	return res.data.ocs.data
+}
+
+/**
+ * Apply the same changes to several flights in one all-or-nothing request.
+ * Returns the updated flights.
+ *
+ * @param ids The flights to change.
+ * @param changes Only the fields to set; absent fields are left untouched.
+ */
+export async function bulkUpdateFlights(ids: number[], changes: BulkChanges): Promise<Flight[]> {
+	const res = await axios.post<OcsResponse<Flight[]>>(url('/api/v1/flights/bulk-update'), { ids, changes }, config)
 	return res.data.ocs.data
 }
 
@@ -95,6 +107,27 @@ export async function resolveAircraftType(q: string): Promise<AircraftResolution
 	const params = new URLSearchParams({ q })
 	const res = await axios.get<OcsResponse<AircraftResolution>>(
 		url(`/api/v1/aircraft-types/resolve?${params.toString()}`), config,
+	)
+	return res.data.ocs.data
+}
+
+export interface AirportResolution {
+	/** On a match the stored label becomes `name`; `code` is IATA when present, else ICAO. */
+	match: { code: string | null; name: string | null } | null
+	/** False when the instance has no airport reference data at all. */
+	referenceLoaded: boolean
+}
+
+/**
+ * Ask the server what a free-text origin/destination resolves to, without
+ * saving — the same resolver reconciliation uses.
+ *
+ * @param q The free text as typed.
+ */
+export async function resolveAirport(q: string): Promise<AirportResolution> {
+	const params = new URLSearchParams({ q })
+	const res = await axios.get<OcsResponse<AirportResolution>>(
+		url(`/api/v1/airports/resolve?${params.toString()}`), config,
 	)
 	return res.data.ocs.data
 }

@@ -980,4 +980,281 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame('BOEING', $flight->getAircraftManufacturer());
 		$this->assertSame('737-8', $flight->getAircraftModel());
 	}
+
+	// --- bulkUpdate ---
+
+	/**
+	 * Stored flights keyed by id, served by findForUser for alice only.
+	 *
+	 * @param array<int, Flight> $flights
+	 */
+	private function storeFlights(array $flights): void {
+		$this->mapper->method('findForUser')->willReturnCallback(
+			function (int $id, string $userId) use ($flights): Flight {
+				if ($userId !== 'alice' || !isset($flights[$id])) {
+					throw new DoesNotExistException('nope');
+				}
+				return $flights[$id];
+			});
+		$this->mapper->method('update')->willReturnArgument(0);
+		$this->mapper->method('transactional')->willReturnCallback(fn (callable $fn) => $fn());
+	}
+
+	/**
+	 * A fully reconciled DUB→FRA leg whose labels, like imported data, do not
+	 * resolve on their own — so any accidental re-resolve shows up as damage.
+	 */
+	private function reconciledFlight(array $overrides = []): Flight {
+		$flight = new Flight();
+		$flight->setUserId('alice');
+		$flight->setFlightDate('2026-02-16');
+		$flight->setOriginLabel('Dublin');
+		$flight->setOriginCode('DUB');
+		$flight->setDestinationLabel('Frankfurt am Main');
+		$flight->setDestinationCode('FRA');
+		$flight->setDistanceKm(1086);
+		$flight->setSeat('15A');
+		$flight->setNotes('window');
+		$flight->setRegistration('EI-DVM');
+		$flight->setUpdatedAt(1600000000);
+		foreach ($overrides as $setter => $value) {
+			$flight->$setter($value);
+		}
+		return $flight;
+	}
+
+	public function testBulkUpdateSetsOnlyTheGivenFieldOnEveryFlight(): void {
+		$a = $this->reconciledFlight();
+		$b = $this->reconciledFlight(['setSeat' => '2C']);
+		$this->storeFlights([7 => $a, 8 => $b]);
+
+		$result = $this->service->bulkUpdate('alice', [7, 8], ['cabinClass' => 'business']);
+
+		$this->assertSame([$a, $b], $result);
+		foreach ($result as $flight) {
+			$this->assertSame('business', $flight->getCabinClass());
+			$this->assertSame('EI-DVM', $flight->getRegistration(), 'absent key left alone');
+			$this->assertSame('window', $flight->getNotes());
+			$this->assertSame(1700000000, $flight->getUpdatedAt());
+		}
+		$this->assertSame('15A', $a->getSeat(), 'per-leg values survive');
+		$this->assertSame('2C', $b->getSeat());
+	}
+
+	/**
+	 * The trap that rules out merging stored rows into update(): a stored code
+	 * sent back as an explicit code drops the coordinates and wipes the distance.
+	 */
+	public function testBulkUpdateOfAnUnrelatedFieldKeepsRouteCodesAndDistance(): void {
+		$flight = $this->reconciledFlight();
+		$this->storeFlights([7 => $flight]);
+		$this->reconciler->expects($this->never())->method('resolve');
+		$this->aircraftReconciler->expects($this->never())->method('resolve');
+
+		$this->service->bulkUpdate('alice', [7], ['cabinClass' => 'economy']);
+
+		$this->assertSame('DUB', $flight->getOriginCode());
+		$this->assertSame('Dublin', $flight->getOriginLabel());
+		$this->assertSame('FRA', $flight->getDestinationCode());
+		$this->assertSame(1086, $flight->getDistanceKm());
+	}
+
+	/**
+	 * The other trap: nulling the stored codes instead would leave a code-only
+	 * endpoint (a restored backup) with neither code nor label — invalid.
+	 */
+	public function testBulkUpdateAcceptsAFlightWhoseEndpointHasACodeButNoLabel(): void {
+		$flight = $this->reconciledFlight(['setOriginLabel' => null]);
+		$this->storeFlights([7 => $flight]);
+
+		$this->service->bulkUpdate('alice', [7], ['registration' => 'EI-DVN']);
+
+		$this->assertSame('EI-DVN', $flight->getRegistration());
+		$this->assertSame('DUB', $flight->getOriginCode());
+		$this->assertNull($flight->getOriginLabel());
+	}
+
+	public function testBulkUpdateNormalisesTheAirlineCodeAndTrimsBlanksToNull(): void {
+		$flight = $this->reconciledFlight();
+		$this->storeFlights([7 => $flight]);
+
+		$this->service->bulkUpdate('alice', [7], ['airlineCode' => ' ei ', 'registration' => '  ']);
+
+		$this->assertSame('EI', $flight->getAirlineCode());
+		$this->assertNull($flight->getRegistration(), 'a blank value clears the field');
+	}
+
+	public function testBulkUpdateReResolvesAChangedEndpointAndRecomputesDistance(): void {
+		$flight = $this->reconciledFlight();
+		$this->storeFlights([7 => $flight]);
+		$this->reconciler->method('resolve')->willReturnMap([
+			['LHR', new AirportMatch('LHR', 'London Heathrow', 51.47, -0.4543)],
+			['FRA', new AirportMatch('FRA', 'Frankfurt am Main', 50.03, 8.57)],
+		]);
+
+		$this->service->bulkUpdate('alice', [7], ['originLabel' => 'LHR']);
+
+		$this->assertSame('LHR', $flight->getOriginCode());
+		$this->assertSame('London Heathrow', $flight->getOriginLabel());
+		$this->assertSame('FRA', $flight->getDestinationCode(), 'untouched side preserved');
+		$this->assertSame('Frankfurt am Main', $flight->getDestinationLabel());
+		$this->assertNotNull($flight->getDistanceKm());
+		$this->assertNotSame(1086, $flight->getDistanceKm(), 'distance reflects LHR→FRA');
+	}
+
+	public function testBulkUpdateClearsTheCodeWhenANewEndpointLabelDoesNotResolve(): void {
+		$flight = $this->reconciledFlight();
+		$this->storeFlights([7 => $flight]);
+		$this->reconciler->method('resolve')->willReturnMap([
+			['Nowhere', null],
+			['FRA', new AirportMatch('FRA', 'Frankfurt am Main', 50.03, 8.57)],
+		]);
+
+		$this->service->bulkUpdate('alice', [7], ['originLabel' => 'Nowhere']);
+
+		$this->assertNull($flight->getOriginCode());
+		$this->assertSame('Nowhere', $flight->getOriginLabel());
+		$this->assertNull($flight->getDistanceKm());
+	}
+
+	public function testBulkUpdateRejectsClearingARequiredEndpoint(): void {
+		$this->storeFlights([7 => $this->reconciledFlight()]);
+		$this->mapper->expects($this->never())->method('update');
+		$this->expectException(ValidationException::class);
+
+		$this->service->bulkUpdate('alice', [7], ['destinationLabel' => ' ']);
+	}
+
+	/**
+	 * A pick sets the reference triple on every leg and keeps each leg's own
+	 * typed text — the record of what the user wrote is never overwritten.
+	 */
+	public function testBulkUpdateAircraftPickKeepsEachLegsTypedText(): void {
+		$a = $this->reconciledFlight(['setAircraftTypeRaw' => 'B737-800']);
+		$b = $this->reconciledFlight(['setAircraftTypeRaw' => '738']);
+		$this->storeFlights([7 => $a, 8 => $b]);
+		$this->aircraftReconciler->expects($this->never())->method('resolve');
+
+		$this->service->bulkUpdate('alice', [7, 8], [
+			'aircraftTypeCode' => 'B738',
+			'aircraftManufacturer' => 'BOEING',
+			'aircraftModel' => '737-800',
+		]);
+
+		$this->assertSame('B737-800', $a->getAircraftTypeRaw());
+		$this->assertSame('738', $b->getAircraftTypeRaw());
+		foreach ([$a, $b] as $flight) {
+			$this->assertSame('B738', $flight->getAircraftTypeCode());
+			$this->assertSame('BOEING', $flight->getAircraftManufacturer());
+			$this->assertSame('737-800', $flight->getAircraftModel());
+		}
+	}
+
+	public function testBulkUpdateAircraftFreeTextReplacesAStaleType(): void {
+		$flight = $this->reconciledFlight([
+			'setAircraftTypeRaw' => 'B738',
+			'setAircraftTypeCode' => 'B738',
+			'setAircraftManufacturer' => 'BOEING',
+			'setAircraftModel' => '737-800',
+		]);
+		$this->storeFlights([7 => $flight]);
+		$this->aircraftReconciler->method('resolve')
+			->with('B77W')
+			->willReturn(new AircraftMatch('B77W', 'BOEING', '777-300ER'));
+
+		$this->service->bulkUpdate('alice', [7], ['aircraftTypeRaw' => 'B77W']);
+
+		$this->assertSame('B77W', $flight->getAircraftTypeRaw());
+		$this->assertSame('B77W', $flight->getAircraftTypeCode());
+		$this->assertSame('777-300ER', $flight->getAircraftModel());
+	}
+
+	/**
+	 * update()'s preserve rule treats an unchanged (null) raw text as "keep the
+	 * type"; an explicit bulk clear must not fall into it.
+	 */
+	public function testBulkUpdateClearsTheAircraftEvenWhenNoTextWasStored(): void {
+		$flight = $this->reconciledFlight([
+			'setAircraftTypeCode' => 'B738',
+			'setAircraftManufacturer' => 'BOEING',
+			'setAircraftModel' => '737-800',
+		]);
+		$this->storeFlights([7 => $flight]);
+
+		$this->service->bulkUpdate('alice', [7], ['aircraftTypeRaw' => null]);
+
+		$this->assertNull($flight->getAircraftTypeRaw());
+		$this->assertNull($flight->getAircraftTypeCode());
+		$this->assertNull($flight->getAircraftManufacturer());
+		$this->assertNull($flight->getAircraftModel());
+	}
+
+	public function testBulkUpdateFailsTheWholeBatchForAnotherUsersFlight(): void {
+		$this->storeFlights([7 => $this->reconciledFlight()]);
+		$this->mapper->expects($this->never())->method('update');
+		$this->mapper->expects($this->never())->method('transactional');
+		$this->expectException(NotFoundException::class);
+
+		$this->service->bulkUpdate('alice', [7, 99], ['cabinClass' => 'first']);
+	}
+
+	/**
+	 * Every write happens inside the one transactional() call — so a failure on
+	 * the second flight rolls back the first (rollback itself is TTransactional's).
+	 */
+	public function testBulkUpdateWritesEveryFlightInsideOneTransaction(): void {
+		$this->mapper->method('findForUser')->willReturnCallback(fn () => $this->reconciledFlight());
+		$inTransaction = false;
+		$writes = [];
+		$this->mapper->expects($this->once())->method('transactional')
+			->willReturnCallback(function (callable $fn) use (&$inTransaction) {
+				$inTransaction = true;
+				$result = $fn();
+				$inTransaction = false;
+				return $result;
+			});
+		$this->mapper->method('update')->willReturnCallback(function (Flight $f) use (&$inTransaction, &$writes) {
+			$writes[] = $inTransaction;
+			return $f;
+		});
+
+		$this->service->bulkUpdate('alice', [7, 8], ['cabinClass' => 'first']);
+
+		$this->assertSame([true, true], $writes);
+	}
+
+	public function testBulkUpdateUpdatesARepeatedIdOnce(): void {
+		$this->mapper->method('findForUser')->willReturn($this->reconciledFlight());
+		$this->mapper->method('transactional')->willReturnCallback(fn (callable $fn) => $fn());
+		$this->mapper->expects($this->once())->method('update')->willReturnArgument(0);
+
+		$this->assertCount(1, $this->service->bulkUpdate('alice', [7, 7], ['cabinClass' => 'first']));
+	}
+
+	/**
+	 * @return array<string, array{0: array<array-key, mixed>, 1: array<array-key, mixed>}>
+	 */
+	public static function invalidBulkRequests(): array {
+		return [
+			'no ids' => [[], ['cabinClass' => 'first']],
+			'non-integer id' => [['7'], ['cabinClass' => 'first']],
+			'no changes' => [[7], []],
+			'per-leg field' => [[7], ['seat' => '1A']],
+			'date' => [[7], ['flightDate' => '2026-01-01']],
+			'non-string value' => [[7], ['registration' => 12]],
+			'invalid cabin' => [[7], ['cabinClass' => 'steerage']],
+			'model without designator' => [[7], ['aircraftModel' => '737-800']],
+		];
+	}
+
+	/**
+	 * @dataProvider invalidBulkRequests
+	 */
+	public function testBulkUpdateRejectsInvalidRequestsBeforeWriting(array $ids, array $changes): void {
+		$this->storeFlights([7 => $this->reconciledFlight()]);
+		$this->mapper->expects($this->never())->method('update');
+		$this->expectException(ValidationException::class);
+
+		$this->service->bulkUpdate('alice', $ids, $changes);
+	}
 }

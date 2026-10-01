@@ -6,6 +6,7 @@ namespace OCA\FlightJournal\Controller;
 
 use OCA\FlightJournal\Db\AirportMapper;
 use OCA\FlightJournal\Db\FlightMapper;
+use OCA\FlightJournal\Service\AirportReconciliationService;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -29,8 +30,42 @@ class AirportApiController extends OCSController {
 		private AirportMapper $airports,
 		private FlightMapper $flights,
 		private IUserSession $userSession,
+		private AirportReconciliationService $reconciler,
 	) {
 		parent::__construct($appName, $request);
+	}
+
+	/**
+	 * Report what a free-text origin/destination resolves to, without saving.
+	 *
+	 * The airport counterpart of the aircraft resolve endpoint, for the same
+	 * reason: the bulk editor previews the answer reconciliation will reach by
+	 * asking the one resolver, rather than approximating its tiers (code → name →
+	 * unique city) on the client. On a match the stored label becomes `name`, so
+	 * the preview can show what the field will actually read.
+	 *
+	 * `referenceLoaded` tells "no match" apart from "no airport reference data on
+	 * this instance"; only computed on a miss.
+	 *
+	 * @param string $q The free text as typed
+	 * @return DataResponse<Http::STATUS_OK, array{match: ?array{code: ?string, name: ?string}, referenceLoaded: bool}, array{}>
+	 *
+	 * 200: Resolution reported (match may be null)
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'GET', url: '/api/v1/airports/resolve')]
+	public function resolve(string $q = ''): DataResponse {
+		$match = $this->reconciler->resolve($q);
+		if ($match !== null) {
+			return new DataResponse([
+				'match' => ['code' => $match->code, 'name' => $match->name],
+				'referenceLoaded' => true,
+			]);
+		}
+		return new DataResponse([
+			'match' => null,
+			'referenceLoaded' => $this->airports->count() > 0,
+		]);
 	}
 
 	/**

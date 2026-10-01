@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '../api.ts'
-import type { Flight, FlightInput } from '../types.ts'
+import type { BulkChanges, Flight, FlightInput } from '../types.ts'
 
 export const useFlightsStore = defineStore('flights', () => {
 	const flights = ref<Flight[]>([])
@@ -30,6 +30,12 @@ export const useFlightsStore = defineStore('flights', () => {
 		return updated
 	}
 
+	async function bulkUpdate(ids: number[], changes: BulkChanges) {
+		const updated = new Map((await api.bulkUpdateFlights(ids, changes)).map((f) => [f.id, f]))
+		flights.value = flights.value.map((f) => updated.get(f.id) ?? f)
+		return [...updated.values()]
+	}
+
 	async function remove(id: number) {
 		await api.deleteFlight(id)
 		flights.value = flights.value.filter((f) => f.id !== id)
@@ -42,5 +48,5 @@ export const useFlightsStore = defineStore('flights', () => {
 		flights.value = await api.listFlights()
 	}
 
-	return { flights, loading, loaded, fetchAll, create, update, remove, move }
+	return { flights, loading, loaded, fetchAll, create, update, bulkUpdate, remove, move }
 })

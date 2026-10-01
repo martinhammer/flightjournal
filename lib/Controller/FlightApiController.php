@@ -179,6 +179,34 @@ class FlightApiController extends OCSController {
 	}
 
 	/**
+	 * Apply the same changes to several flights at once
+	 *
+	 * All-or-nothing: an unknown flight id or an invalid change fails the whole
+	 * batch and nothing is written. A key present in `changes` is set (null clears
+	 * it); an absent key is left untouched on every flight.
+	 *
+	 * @param list<int> $ids Ids of the flights to change
+	 * @param array<string, ?string> $changes Fields to set; any of cabinClass, airlineCode, flightNumber, registration, originLabel, destinationLabel, aircraftTypeRaw, aircraftTypeCode, aircraftManufacturer, aircraftModel
+	 * @return DataResponse<Http::STATUS_OK, list<FlightJournalFlight>, array{}>|DataResponse<Http::STATUS_NOT_FOUND, array{message: string}, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
+	 *
+	 * 200: Flights updated
+	 * 400: No flights or changes given, or a change is invalid
+	 * 404: A flight was not found
+	 */
+	#[NoAdminRequired]
+	#[ApiRoute(verb: 'POST', url: '/api/v1/flights/bulk-update')]
+	public function bulkUpdate(array $ids, array $changes): DataResponse {
+		try {
+			$flights = $this->service->bulkUpdate($this->getUserId(), $ids, $changes);
+			return new DataResponse(array_map(fn ($f) => $f->jsonSerialize(), $flights));
+		} catch (NotFoundException $e) {
+			return new DataResponse(['message' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+		} catch (ValidationException $e) {
+			return new DataResponse(['message' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+		}
+	}
+
+	/**
 	 * Move a flight one position within its day (swap order with the adjacent leg)
 	 *
 	 * @param int $id Flight id

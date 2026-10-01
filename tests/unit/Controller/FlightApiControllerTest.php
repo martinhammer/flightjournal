@@ -7,6 +7,8 @@ namespace OCA\FlightJournal\Tests\Unit\Controller;
 use OCA\FlightJournal\Controller\FlightApiController;
 use OCA\FlightJournal\Db\Flight;
 use OCA\FlightJournal\Service\FlightService;
+use OCA\FlightJournal\Service\NotFoundException;
+use OCA\FlightJournal\Service\ValidationException;
 use OCP\AppFramework\Http;
 use OCP\IRequest;
 use OCP\IUser;
@@ -142,5 +144,35 @@ class FlightApiControllerTest extends TestCase {
 			destinationLabel: 'London',
 			aircraftTypeRaw: 'A320neo',
 		);
+	}
+
+	public function testBulkUpdateForwardsIdsAndChangesToTheService(): void {
+		$changes = ['cabinClass' => 'business', 'aircraftTypeRaw' => null];
+		$this->service->expects($this->once())
+			->method('bulkUpdate')
+			->with('alice', [7, 8], $changes)
+			->willReturn([new Flight(), new Flight()]);
+
+		$response = $this->controller->bulkUpdate([7, 8], $changes);
+
+		$this->assertSame(Http::STATUS_OK, $response->getStatus());
+		$this->assertCount(2, $response->getData());
+	}
+
+	public function testBulkUpdateMapsAMissingFlightTo404(): void {
+		$this->service->method('bulkUpdate')->willThrowException(new NotFoundException('Flight 9 not found'));
+
+		$response = $this->controller->bulkUpdate([9], ['cabinClass' => 'first']);
+
+		$this->assertSame(Http::STATUS_NOT_FOUND, $response->getStatus());
+	}
+
+	public function testBulkUpdateMapsAnInvalidChangeTo400(): void {
+		$this->service->method('bulkUpdate')->willThrowException(new ValidationException('seat cannot be bulk-edited'));
+
+		$response = $this->controller->bulkUpdate([7], ['seat' => '1A']);
+
+		$this->assertSame(Http::STATUS_BAD_REQUEST, $response->getStatus());
+		$this->assertSame(['message' => 'seat cannot be bulk-edited'], $response->getData());
 	}
 }

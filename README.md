@@ -6,7 +6,7 @@ The app is a flight log for the frequent traveler, keeping track of flights with
 
 Key features:
 * Flights screen to add, view, and manage your flight log entries
-* The Flights screen supports various filters and sorting
+* The Flights screen supports filters, sorting and bulk edit
 * Admin Settings screen which allows import of airport and aircraft reference data sets
 * Personal Settings screen with bulk import/export, bulk delete and reconciliation (enrichment) against reference data sets
 * Map view showing your flights on a map (depends on airport reference data with geo coordinates) - different projections are supported
@@ -16,7 +16,6 @@ Key features:
 * Demo data set which can be used for experimentation
 
 Future roadmap:
-* Bulk updates for selected attributes (e.g. aircraft type, cabin class)
 * Analytics screen with cool statistics and visualizations
 * Localization
 * Further reference data enrichment

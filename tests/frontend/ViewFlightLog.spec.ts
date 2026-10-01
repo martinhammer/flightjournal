@@ -1,20 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 
 // Covers the route-query-driven filtering and the removable filter chip.
 
-const { store, push, routeHolder } = vi.hoisted(() => ({
-	store: {
-		flights: [] as unknown[],
-		loaded: true,
-		loading: false,
-		fetchAll: vi.fn(),
-		remove: vi.fn(),
-		move: vi.fn(),
-	},
-	push: vi.fn(),
-	routeHolder: { query: {} as Record<string, string> },
-}))
+// The route is reactive (as vue-router's is) so a query change mid-test drives
+// the view's watchers — the selection clears on any filter change.
+const { store, push, routeHolder } = await vi.hoisted(async () => {
+	const { reactive } = await import('vue')
+	return {
+		store: {
+			flights: [] as unknown[],
+			loaded: true,
+			loading: false,
+			fetchAll: vi.fn(),
+			remove: vi.fn(),
+			move: vi.fn(),
+		},
+		push: vi.fn(),
+		routeHolder: reactive({ query: {} as Record<string, string> }),
+	}
+})
 
 vi.mock('../../src/store/flights.ts', () => ({ useFlightsStore: () => store }))
 vi.mock('vue-router', async (importOriginal) => ({
@@ -67,7 +73,26 @@ const NcActionButton = {
 	template: '<button class="row-action" @click="$emit(\'click\')"><slot /></button>',
 }
 
+// Emits on click like the real switch, so a test's click — and its shiftKey —
+// passes through the cell's capture listener exactly as in the browser.
+const NcCheckboxRadioSwitch = {
+	props: ['modelValue', 'indeterminate', 'ariaLabel'],
+	emits: ['update:modelValue'],
+	template: '<input type="checkbox" class="select-box" :checked="modelValue" :data-indeterminate="indeterminate" :aria-label="ariaLabel" @click="$emit(\'update:modelValue\', !modelValue)">',
+}
+
+// Exposes what the view hands the dialog, and lets a test emit its events.
+const BulkEditDialog = {
+	name: 'BulkEditDialog',
+	props: ['open', 'flights'],
+	emits: ['update:open', 'saved'],
+	template: '<div v-if="open" class="bulk-dialog" :data-ids="flights.map((f) => f.id).join(\',\')" />',
+}
+
 const stubs = {
+	NcCheckboxRadioSwitch,
+	BulkEditDialog,
+	Close: true,
 	NcChip: NcChipStub,
 	NcButton: NcButtonStub,
 	NcEmptyContent: true,
@@ -85,8 +110,8 @@ const stubs = {
 	FilterPicker: true,
 }
 
-function render() {
-	return mount(ViewFlightLog, { global: { stubs } })
+function render(options: { attachTo?: HTMLElement } = {}) {
+	return mount(ViewFlightLog, { global: { stubs }, ...options })
 }
 
 beforeEach(() => {
@@ -191,9 +216,9 @@ describe('ViewFlightLog filtering', () => {
 })
 
 describe('ViewFlightLog distance column', () => {
-	// Distance cell is the 4th column (date, flight, route, distance, …).
+	// Distance cell is the 5th column (select, date, flight, route, distance, …).
 	const distanceCells = (wrapper: ReturnType<typeof render>) =>
-		wrapper.findAll('tbody tr').map((r) => r.findAll('td')[3].text().replace(/\D/g, ''))
+		wrapper.findAll('tbody tr').map((r) => r.findAll('td')[4].text().replace(/\D/g, ''))
 
 	it('sorts numerically by distance, not lexically', async () => {
 		const wrapper = render()
@@ -217,9 +242,9 @@ describe('ViewFlightLog distance column', () => {
 })
 
 describe('ViewFlightLog aircraft column', () => {
-	// Aircraft is the 5th column (date, flight, route, distance, aircraft, …).
+	// Aircraft is the 6th column (select, date, flight, route, distance, aircraft, …).
 	const aircraftCell = (wrapper: ReturnType<typeof render>) =>
-		wrapper.find('tbody tr').findAll('td')[4].text()
+		wrapper.find('tbody tr').findAll('td')[5].text()
 
 	it('shows the reference manufacturer and model, not the designator', () => {
 		store.flights = [{
@@ -321,5 +346,143 @@ describe('ViewFlightLog within-day reordering', () => {
 		routeHolder.query = { airport: 'AAA', airportDir: 'from' }
 		const wrapper = render()
 		expect(wrapper.findAll('td.reorder .nc-button')).toHaveLength(0)
+	})
+})
+
+describe('ViewFlightLog row selection', () => {
+	// Default sort is date desc, so rows read f3, f2, f1 top to bottom.
+	const rowBoxes = (wrapper: ReturnType<typeof render>) => wrapper.findAll('tbody .select-box')
+	const headerBox = (wrapper: ReturnType<typeof render>) => wrapper.find('thead .select-box')
+	const selectedIds = (wrapper: ReturnType<typeof render>) =>
+		wrapper.findAll('tbody tr').filter((r) => r.classes('selected')).map((r) => r.find('td:nth-child(2)').text())
+
+	it('adds the selected count to the heading count', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+	})
+
+	it('keeps the filtered count format alongside the selection', async () => {
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('2 of 3 flights · 1 selected')
+	})
+
+	it('toggles a row off again', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
+	})
+
+	it('selects the whole range on shift-click', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		await rowBoxes(wrapper)[2].trigger('click', { shiftKey: true })
+		expect(selectedIds(wrapper)).toEqual(['2026-01-03', '2026-01-02', '2026-01-01'])
+	})
+
+	it('selects only the clicked row without shift', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		await rowBoxes(wrapper)[2].trigger('click')
+		expect(selectedIds(wrapper)).toEqual(['2026-01-03', '2026-01-01'])
+	})
+
+	it('select-all selects only the visible rows, and toggles them off again', async () => {
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		const wrapper = render()
+		await headerBox(wrapper).trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('2 of 3 flights · 2 selected')
+
+		await headerBox(wrapper).trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('2 of 3 flights')
+	})
+
+	it('marks the select-all box indeterminate on a partial selection', async () => {
+		const wrapper = render()
+		expect(headerBox(wrapper).attributes('data-indeterminate')).toBe('false')
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(headerBox(wrapper).attributes('data-indeterminate')).toBe('true')
+	})
+
+	it('clears the selection when the filter changes', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		routeHolder.query = { airport: 'LHR', airportDir: 'either' }
+		await nextTick()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
+	})
+
+	it('clears the selection from the "Clear selection" button', async () => {
+		const wrapper = render()
+		expect(wrapper.find('.clear-selection').exists()).toBe(false)
+		await rowBoxes(wrapper)[0].trigger('click')
+		await wrapper.find('.clear-selection').trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
+	})
+
+	it('clears the selection on Escape', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await rowBoxes(wrapper)[0].trigger('click')
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+		await nextTick()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
+		wrapper.unmount()
+	})
+
+	it('does not open the editor when the checkbox cell is double-clicked', async () => {
+		const wrapper = render()
+		await wrapper.find('tbody td.select').trigger('dblclick')
+		expect(push).not.toHaveBeenCalled()
+	})
+
+	it('hides the within-day reorder chevrons while selecting', async () => {
+		store.flights = [1, 2].map((id) => ({ ...flight(id, 'AAA', 'BBB'), flightDate: '2026-03-15', daySeq: id }))
+		const wrapper = render()
+		expect(wrapper.findAll('td.reorder .nc-button')).toHaveLength(4)
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(wrapper.findAll('td.reorder .nc-button')).toHaveLength(0)
+	})
+})
+
+describe('ViewFlightLog bulk edit', () => {
+	const rowBoxes = (wrapper: ReturnType<typeof render>) => wrapper.findAll('tbody .select-box')
+
+	it('offers bulk edit only while something is selected', async () => {
+		const wrapper = render()
+		expect(wrapper.find('.bulk-edit').exists()).toBe(false)
+		await rowBoxes(wrapper)[0].trigger('click')
+		await rowBoxes(wrapper)[1].trigger('click')
+		expect(wrapper.find('.bulk-edit').text()).toBe('Edit 2 flights…')
+	})
+
+	it('opens the dialog with exactly the selected flights', async () => {
+		const wrapper = render()
+		// Rows read f3, f2, f1; select the first and last.
+		await rowBoxes(wrapper)[0].trigger('click')
+		await rowBoxes(wrapper)[2].trigger('click')
+		await wrapper.find('.bulk-edit').trigger('click')
+		expect(wrapper.find('.bulk-dialog').attributes('data-ids')).toBe('3,1')
+	})
+
+	it('clears the selection once the dialog reports a save', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		await wrapper.find('.bulk-edit').trigger('click')
+		wrapper.findComponent({ name: 'BulkEditDialog' }).vm.$emit('saved')
+		await nextTick()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
+	})
+
+	it('keeps the selection when Escape closes the dialog', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await rowBoxes(wrapper)[0].trigger('click')
+		await wrapper.find('.bulk-edit').trigger('click')
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+		await nextTick()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+		wrapper.unmount()
 	})
 })

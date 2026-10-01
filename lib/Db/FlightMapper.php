@@ -6,6 +6,7 @@ namespace OCA\FlightJournal\Db;
 
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Db\QBMapper;
+use OCP\AppFramework\Db\TTransactional;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
@@ -13,9 +14,24 @@ use OCP\IDBConnection;
  * @template-extends QBMapper<Flight>
  */
 class FlightMapper extends QBMapper {
+	use TTransactional;
+
 	/** @psalm-suppress PossiblyUnusedMethod */
 	public function __construct(IDBConnection $db) {
 		parent::__construct($db, 'flightjournal_flights', Flight::class);
+	}
+
+	/**
+	 * Run $fn in one transaction: committed if it returns, rolled back and
+	 * rethrown if it throws. Lives here, beside the connection, so services stay
+	 * free of IDBConnection.
+	 *
+	 * @template T
+	 * @param callable():T $fn
+	 * @return T
+	 */
+	public function transactional(callable $fn): mixed {
+		return $this->atomic($fn, $this->db);
 	}
 
 	/**

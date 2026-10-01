@@ -24,6 +24,23 @@ export interface Flight {
 export type FlightInput = Omit<Flight, 'id' | 'daySeq' | 'distanceKm' | 'createdAt' | 'updatedAt'>
 
 /**
+ * Where a reference-data preview line stands. `unmatched` and `noReference` both
+ * mean "this text will not resolve", which the bulk editor turns into a warning.
+ */
+export type ResolutionKind = 'idle' | 'checking' | 'matched' | 'unmatched' | 'noReference' | 'error'
+
+/**
+ * The fields a bulk update may set, mirroring the server's whitelist. Patch
+ * semantics: a present key is set on every flight (null clears it), an absent
+ * key is left alone.
+ */
+export type BulkChanges = Partial<Pick<FlightInput,
+	| 'cabinClass' | 'airlineCode' | 'flightNumber' | 'registration'
+	| 'originLabel' | 'destinationLabel'
+	| 'aircraftTypeRaw' | 'aircraftTypeCode' | 'aircraftManufacturer' | 'aircraftModel'
+>>
+
+/**
  * One reference row as chosen in the aircraft type-ahead. Sending these three
  * together is what tells the backend "the user picked this" — `resolveAircraft`
  * then honours them verbatim instead of reconciling the free text.

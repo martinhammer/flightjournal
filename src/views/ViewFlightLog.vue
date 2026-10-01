@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import NcChip from '@nextcloud/vue/components/NcChip'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
+import Close from 'vue-material-design-icons/Close.vue'
 import MenuDown from 'vue-material-design-icons/MenuDown.vue'
 import MenuUp from 'vue-material-design-icons/MenuUp.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import { showConfirmation, showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
+import BulkEditDialog from '../components/BulkEditDialog.vue'
 import FilterPicker from '../components/FilterPicker.vue'
 import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
 import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
@@ -49,7 +52,11 @@ function viewFlightOnMap(f: Flight) {
 	router.push({ name: 'map', query: { flight: String(f.id) } })
 }
 
-onMounted(() => { if (!store.loaded) store.fetchAll() })
+onMounted(() => {
+	if (!store.loaded) store.fetchAll()
+	window.addEventListener('keydown', onKeydown)
+})
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 const sortKey = ref<SortKey>('date')
 const sortDir = ref<SortDir>('desc')
@@ -110,8 +117,10 @@ const visibleFlights = computed<Flight[]>(() => applyFilters(sortedFlights.value
 // and also under the "Days with multiple flights" filter alone — it keeps whole
 // days intact (it's there precisely to make reordering easier). Any other filter
 // can drop legs from a day, breaking the neighbour relationship.
+// Hidden while selecting: a second row control competing with the checkboxes,
+// and a one-row move means nothing for a multi-row selection.
 const canReorder = computed(() => {
-	if (sortKey.value !== 'date') return false
+	if (sortKey.value !== 'date' || selecting.value) return false
 	const filters = activeFilters.value
 	return filters.length === 0 || (filters.length === 1 && filters[0].id === 'multiday')
 })
@@ -141,12 +150,84 @@ async function move(f: Flight, isUp: boolean) {
 	}
 }
 
+// --- Row selection (groundwork for bulk edit) ---
+//
+// Checkboxes reveal on row hover, then stay visible on every row once anything
+// is selected (Mail's selection mode). Bulk actions only ever touch rows the
+// user can see, so the selection is cleared whenever the filter changes rather
+// than letting hidden rows stay selected.
+
+const selected = ref<Set<number>>(new Set())
+// Anchor for shift-click range selection: the last row toggled.
+let anchorId: number | null = null
+// The checkbox emits only its new value, so the shift state of the click that
+// caused it is captured from the native event on the way down.
+let shiftHeld = false
+
+// Intersected with the visible rows so a selected leg deleted from its row menu
+// drops out of the count and of any bulk action.
+const selectedFlights = computed<Flight[]>(() => visibleFlights.value.filter((f) => selected.value.has(f.id)))
+const selecting = computed(() => selectedFlights.value.length > 0)
+const allSelected = computed(() => selecting.value && selectedFlights.value.length === visibleFlights.value.length)
+
+function clearSelection() {
+	selected.value = new Set()
+	anchorId = null
+}
+
+const bulkEditOpen = ref(false)
+
+// The route query on this view holds nothing but filters, so any change to it
+// is a filter change.
+watch(() => route.query, clearSelection)
+
+function noteShift(e: MouseEvent) {
+	shiftHeld = e.shiftKey
+}
+
+// Shift-clicking would otherwise extend a text selection across the rows.
+function suppressTextSelection(e: MouseEvent) {
+	if (e.shiftKey) e.preventDefault()
+}
+
+function toggleRow(f: Flight, checked: boolean) {
+	const list = visibleFlights.value
+	const index = list.findIndex((x) => x.id === f.id)
+	const anchorIndex = anchorId === null ? -1 : list.findIndex((x) => x.id === anchorId)
+	// Shift-click applies the clicked row's new state to the whole range.
+	const targets = shiftHeld && anchorIndex !== -1
+		? list.slice(Math.min(index, anchorIndex), Math.max(index, anchorIndex) + 1)
+		: [f]
+	const next = new Set(selected.value)
+	for (const t of targets) {
+		if (checked) next.add(t.id)
+		else next.delete(t.id)
+	}
+	selected.value = next
+	anchorId = f.id
+	shiftHeld = false
+}
+
+function toggleAll(checked: boolean) {
+	if (checked && !allSelected.value) {
+		selected.value = new Set(visibleFlights.value.map((f) => f.id))
+	} else {
+		clearSelection()
+	}
+}
+
+// Esc also closes the bulk-edit dialog; that press must not clear the selection
+// it is editing.
+function onKeydown(e: KeyboardEvent) {
+	if (e.key === 'Escape' && selecting.value && !bulkEditOpen.value) clearSelection()
+}
+
 const headerCount = computed(() => {
 	const total = store.flights.length
 	const shown = visibleFlights.value.length
 	const plural = (n: number) => `${n} flight${n === 1 ? '' : 's'}`
-	if (activeFilters.value.length === 0 || shown === total) return plural(total)
-	return `${shown} of ${plural(total)}`
+	const count = activeFilters.value.length === 0 || shown === total ? plural(total) : `${shown} of ${plural(total)}`
+	return selecting.value ? `${count} · ${selectedFlights.value.length} selected` : count
 })
 
 function setSort(key: SortKey) {
@@ -196,6 +277,15 @@ async function remove(f: Flight) {
 <template>
 	<div class="view-flight">
 		<h2>Flight log</h2>
+		<!-- A successful apply clears the selection: under a filter such as
+			 "Unmatched aircraft" the fixed rows drop out of view, and a selection
+			 that is partly invisible is exactly what clearing on filter change
+			 exists to prevent. -->
+		<BulkEditDialog
+			:open="bulkEditOpen"
+			:flights="selectedFlights"
+			@update:open="bulkEditOpen = $event"
+			@saved="clearSelection" />
 		<div v-if="store.loading && !store.loaded" class="loader">
 			<NcLoadingIcon />
 		</div>
@@ -209,12 +299,32 @@ async function remove(f: Flight) {
 					@close="clearFilter(filter)" />
 				<span class="filter-count">{{ headerCount }}</span>
 			</div>
-			<div v-if="activeFilters.length" class="filter-actions">
-				<NcButton variant="secondary" @click="viewOnMap">
+			<div v-if="activeFilters.length || selecting" class="filter-actions">
+				<NcButton v-if="activeFilters.length" variant="secondary" @click="viewOnMap">
 					<template #icon>
 						<Map :size="20" />
 					</template>
 					View on map
+				</NcButton>
+				<NcButton
+					v-if="selecting"
+					variant="secondary"
+					class="bulk-edit"
+					@click="bulkEditOpen = true">
+					<template #icon>
+						<Pencil :size="20" />
+					</template>
+					Edit {{ selectedFlights.length }} flight{{ selectedFlights.length === 1 ? '' : 's' }}…
+				</NcButton>
+				<NcButton
+					v-if="selecting"
+					variant="tertiary"
+					class="clear-selection"
+					@click="clearSelection">
+					<template #icon>
+						<Close :size="20" />
+					</template>
+					Clear selection
 				</NcButton>
 			</div>
 			<NcEmptyContent
@@ -225,9 +335,16 @@ async function remove(f: Flight) {
 				v-else-if="visibleFlights.length === 0"
 				name="No matching flights"
 				description="No flights match the current filter." />
-			<table v-else class="flight-table">
+			<table v-else class="flight-table" :class="{ selecting }">
 				<thead>
 					<tr>
+						<th class="select">
+							<NcCheckboxRadioSwitch
+								:model-value="allSelected"
+								:indeterminate="selecting && !allSelected"
+								aria-label="Select all shown flights"
+								@update:model-value="toggleAll" />
+						</th>
 						<th v-for="col in columns" :key="col.key" :class="{ sorted: sortKey === col.key, numeric: col.key === 'distance' }">
 							<button
 								type="button"
@@ -246,7 +363,21 @@ async function remove(f: Flight) {
 					</tr>
 				</thead>
 				<tbody>
-					<tr v-for="(f, i) in visibleFlights" :key="f.id" @dblclick="edit(f)">
+					<tr
+						v-for="(f, i) in visibleFlights"
+						:key="f.id"
+						:class="{ selected: selected.has(f.id) }"
+						@dblclick="edit(f)">
+						<td
+							class="select"
+							@click.capture="noteShift"
+							@mousedown="suppressTextSelection"
+							@dblclick.stop>
+							<NcCheckboxRadioSwitch
+								:model-value="selected.has(f.id)"
+								:aria-label="`Select flight on ${f.flightDate}, ${routeLabel(f)}`"
+								@update:model-value="toggleRow(f, $event)" />
+						</td>
 						<td>{{ f.flightDate }}</td>
 						<td>{{ flightNo(f) }}</td>
 						<td>{{ routeLabel(f) }}</td>
@@ -401,6 +532,37 @@ async function remove(f: Flight) {
 	display: inline-flex;
 	width: 16px;
 	height: 16px;
+}
+
+.flight-table td.select,
+.flight-table th.select {
+	width: 1px;
+	padding-block: 0;
+	padding-inline: 0 4px;
+}
+
+/* Revealed on hover, or on keyboard focus (opacity rather than visibility so the
+   hidden checkbox stays focusable). Once anything is selected every row shows
+   its checkbox; touch screens have no hover, so they always show. */
+.flight-table .select > * {
+	opacity: 0;
+}
+
+.flight-table tbody tr:hover .select > *,
+.flight-table .select:focus-within > *,
+.flight-table:hover th.select > *,
+.flight-table.selecting .select > * {
+	opacity: 1;
+}
+
+@media (hover: none) {
+	.flight-table .select > * {
+		opacity: 1;
+	}
+}
+
+.flight-table tr.selected {
+	background-color: var(--color-primary-element-light);
 }
 
 .actions {
