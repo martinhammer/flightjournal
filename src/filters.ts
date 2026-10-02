@@ -1,4 +1,5 @@
 import type { LocationQuery } from 'vue-router'
+import { WEEKDAYS, dateParts } from './analytics.ts'
 import { CABIN_CLASSES, aircraftDisplay, type Flight } from './types.ts'
 
 /**
@@ -56,6 +57,13 @@ function isoDate(value: unknown): string | null {
 	if (Number.isNaN(d.getTime())) return null
 	// Round-trip to catch dates like 2025-02-30 → parses as 2025-03-02.
 	return d.toISOString().slice(0, 10) === value ? value : null
+}
+
+// A whole number ≥ 0 from the query, or null. Rejects junk rather than letting
+// it filter everything out.
+function nonNegative(value: unknown): number | null {
+	if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+	return Number(value)
 }
 
 const CABIN_LABELS: Record<string, string> = Object.fromEntries(
@@ -191,6 +199,69 @@ export function buildFilters(query: LocationQuery, flights: Flight[] = []): Acti
 				const display = aircraftDisplay(f)
 				return (aircraftBlank && !display) || (display !== null && aircraftSet.has(display.toUpperCase()))
 			},
+		})
+	}
+
+	// Manufacturer of the reconciled aircraft type (Analytics' Manufacturers list).
+	// Unresolved legs have none and never match.
+	const manufacturers = csvParam(query.manufacturer)
+	if (manufacturers.length > 0) {
+		const set = new Set(manufacturers)
+		filters.push({
+			id: 'manufacturer',
+			label: `Manufacturer: ${manufacturers.join(', ')}`,
+			queryKeys: ['manufacturer'],
+			matches: (f) => f.aircraftManufacturer !== null && set.has(f.aircraftManufacturer.toUpperCase()),
+		})
+	}
+
+	// Registration (tail number), as Analytics' most-flown airframe record counts it.
+	const registrations = csvParam(query.registration)
+	if (registrations.length > 0) {
+		const set = new Set(registrations)
+		filters.push({
+			id: 'registration',
+			label: `Registration: ${registrations.join(', ')}`,
+			queryKeys: ['registration'],
+			matches: (f) => !!f.registration && set.has(f.registration.trim().toUpperCase()),
+		})
+	}
+
+	// Day of week, as `mon,tue,…`. Taken from the flight date's calendar parts
+	// (`dateParts`), never local midnight, which shifts a weekday west of UTC.
+	const weekdayNames = WEEKDAYS.map((d) => d.toUpperCase())
+	const weekdays = csvParam(query.weekday)
+		.map((d) => weekdayNames.indexOf(d))
+		.filter((i) => i >= 0)
+	if (weekdays.length > 0) {
+		const set = new Set(weekdays)
+		filters.push({
+			id: 'weekday',
+			label: `Day: ${[...set].sort().map((i) => WEEKDAYS[i]).join(', ')}`,
+			queryKeys: ['weekday'],
+			matches: (f) => set.has(dateParts(f.flightDate).weekday),
+		})
+	}
+
+	// Great-circle distance in km: `distanceMin` inclusive, `distanceMax`
+	// exclusive, either side optional — the same bounds as Analytics' distance
+	// bins, so a bin's bar and its filter agree. Legs without a distance never match.
+	const distanceMin = nonNegative(query.distanceMin)
+	const distanceMax = nonNegative(query.distanceMax)
+	if (distanceMin !== null || distanceMax !== null) {
+		const km = (n: number) => n.toLocaleString('en-US')
+		const label = distanceMax === null
+			? `Distance: ≥ ${km(distanceMin!)} km`
+			: distanceMin === null || distanceMin === 0
+				? `Distance: < ${km(distanceMax)} km`
+				: `Distance: ${km(distanceMin)}–${km(distanceMax)} km`
+		filters.push({
+			id: 'distance',
+			label,
+			queryKeys: ['distanceMin', 'distanceMax'],
+			matches: (f) => f.distanceKm !== null
+				&& (distanceMin === null || f.distanceKm >= distanceMin)
+				&& (distanceMax === null || f.distanceKm < distanceMax),
 		})
 	}
 

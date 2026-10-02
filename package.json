@@ -25,6 +25,7 @@
     "@nextcloud/vue": "^9.13.0",
     "@types/proj4": "^2.19.0",
     "@types/proj4leaflet": "^1.0.12",
+    "chart.js": "^4.5.1",
     "geojson-antimeridian-cut": "^0.1.0",
     "leaflet": "^1.9.4",
     "leaflet.geodesic": "^2.7.2",
@@ -33,6 +34,7 @@
     "proj4leaflet": "^1.0.2",
     "topojson-client": "^3.1.0",
     "vue": "^3.5.43",
+    "vue-chartjs": "^5.3.4",
     "vue-material-design-icons": "^5.3.1",
     "vue-router": "^5.3.1",
     "world-atlas": "^2.0.2"

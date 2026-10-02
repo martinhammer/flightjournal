@@ -11,17 +11,18 @@ Key features:
 * Personal Settings screen with bulk import/export, bulk delete and reconciliation (enrichment) against reference data sets
 * Map view showing your flights on a map (depends on airport reference data with geo coordinates) - different projections are supported
 * Great circle distance is calculated (depends on airport reference data with geo coordinates)
-* Applied filters propagate between the Flights and Map screens
+* Analytics screen with cool charts, visualizations and statistics
+* Applied filters propagate between the Flights, Map, Analytics screens
 * Airports and Aircraft types screens
 * Demo data set which can be used for experimentation
 
 Future roadmap:
-* Analytics screen with cool statistics and visualizations
+* Polishing the rough edges
 * Localization
 * Further reference data enrichment
-* ...and more!
+* Mobile client?
 
-The app is currently not published on Nextcloud app store. This might change once it reaches a certain level of feature-completeness AND if there is any interest or value in publishing it.
+*The app is currently not published on Nextcloud app store. This might change once it reaches a certain level of feature-completeness AND if there is any interest or value in publishing it.*
 
 Credit to the canonical reference data sets supported by the application:
 * Airports: [mwgg/Airports](https://github.com/mwgg/Airports)

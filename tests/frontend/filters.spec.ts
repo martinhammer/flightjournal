@@ -346,3 +346,47 @@ describe('applyFilters', () => {
 		expect(filtered[0].originCode).toBe('LHR')
 	})
 })
+
+describe('Analytics drill-through filters', () => {
+	const leg = (overrides: Partial<Flight>): Flight => ({ ...flight('LHR', 'DXB'), daySeq: 1, distanceKm: null, ...overrides })
+
+	it('filters by weekday from the calendar date, whatever the timezone', () => {
+		const tz = process.env.TZ
+		process.env.TZ = 'America/Los_Angeles'
+		try {
+			const flights = [leg({ id: 1, flightDate: '2025-03-03' }), leg({ id: 2, flightDate: '2025-03-09' })]
+			const filters = buildFilters({ weekday: 'mon,SUN,nope' })
+			expect(filters[0].label).toBe('Day: Mon, Sun')
+			expect(applyFilters(flights, filters).map((f) => f.id)).toEqual([1, 2])
+			expect(applyFilters(flights, buildFilters({ weekday: 'mon' })).map((f) => f.id)).toEqual([1])
+		} finally {
+			process.env.TZ = tz
+		}
+	})
+
+	it('filters by distance with an inclusive minimum and exclusive maximum', () => {
+		const flights = [500, 999, 1000, 8000].map((km, i) => leg({ id: i + 1, distanceKm: km }))
+		flights.push(leg({ id: 9, distanceKm: null }))
+		const between = buildFilters({ distanceMin: '500', distanceMax: '1000' })
+		expect(between[0].label).toBe('Distance: 500–1,000 km')
+		expect(applyFilters(flights, between).map((f) => f.id)).toEqual([1, 2])
+		expect(buildFilters({ distanceMax: '500' })[0].label).toBe('Distance: < 500 km')
+		const over = buildFilters({ distanceMin: '8000' })
+		expect(over[0].label).toBe('Distance: ≥ 8,000 km')
+		expect(applyFilters(flights, over).map((f) => f.id)).toEqual([4])
+	})
+
+	it('ignores junk distances instead of filtering everything out', () => {
+		expect(buildFilters({ distanceMin: '-5', distanceMax: 'far' })).toEqual([])
+	})
+
+	it('filters by manufacturer and by registration, case-insensitively', () => {
+		const flights = [
+			leg({ id: 1, aircraftManufacturer: 'AIRBUS', registration: ' d-aspS' }),
+			leg({ id: 2, aircraftManufacturer: 'BOEING', registration: 'G-XLEA' }),
+			leg({ id: 3 }),
+		]
+		expect(applyFilters(flights, buildFilters({ manufacturer: 'airbus' })).map((f) => f.id)).toEqual([1])
+		expect(applyFilters(flights, buildFilters({ registration: 'D-ASPS' })).map((f) => f.id)).toEqual([1])
+	})
+})
