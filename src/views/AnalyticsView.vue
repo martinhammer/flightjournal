@@ -435,15 +435,15 @@ const cssVars = computed(() => themeCssVars(theme.value))
 
 		<template v-else>
 			<div class="toolbar">
-				<NcSelect class="toolbar__year"
-					:model-value="yearSelection"
-					input-label="Period"
-					:options="yearOptions"
-					:clearable="false"
-					:searchable="false"
-					label="label"
-					@update:model-value="selectYear" />
 				<div class="filter-bar">
+					<NcSelect class="toolbar__year"
+						:model-value="yearSelection"
+						input-label="Period"
+						:options="yearOptions"
+						:clearable="false"
+						:searchable="false"
+						label="label"
+						@update:model-value="selectYear" />
 					<NcChip v-for="filter in chips"
 						:key="filter.id"
 						:text="filter.label"
@@ -770,12 +770,14 @@ const cssVars = computed(() => themeCssVars(theme.value))
 .toolbar {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
 	margin-bottom: 24px;
 }
 
-.toolbar__year {
-	max-width: 280px;
+/* NcSelect's own block margins would make this row taller than the Flights
+   and Map ones; the floating "Period" label overhangs into the margin above. */
+.filter-bar .toolbar__year.nc-select {
+	flex: 0 1 280px;
+	margin-block: 0;
 }
 
 .filter-bar,
@@ -784,6 +786,14 @@ const cssVars = computed(() => themeCssVars(theme.value))
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 10px;
+}
+
+/* Same height and margins as the Flights and Map filter rows, so the action
+   buttons below sit at the same offset from the heading on all three. */
+.filter-bar {
+	min-height: var(--default-clickable-area);
+	margin-top: 8px;
+	margin-bottom: 6px;
 }
 
 .muted {

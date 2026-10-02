@@ -183,6 +183,16 @@ describe('ViewFlightLog filtering', () => {
 		})
 	})
 
+	it('carries the active filter to the Analytics view via "View analytics"', async () => {
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		const wrapper = render()
+		await wrapper.findAll('.nc-button').find((b) => b.text() === 'View analytics')!.trigger('click')
+		expect(push).toHaveBeenCalledWith({
+			name: 'analytics',
+			query: { airport: 'LHR', airportDir: 'to' },
+		})
+	})
+
 	it('shows no "View on map" button when no filter is active', () => {
 		const wrapper = render()
 		expect(wrapper.find('.nc-button').exists()).toBe(false)

@@ -22,6 +22,7 @@ import FilterPicker from '../components/FilterPicker.vue'
 import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
 import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
 import Map from 'vue-material-design-icons/Map.vue'
+import ChartBar from 'vue-material-design-icons/ChartBar.vue'
 
 type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
 type SortDir = 'asc' | 'desc'
@@ -45,6 +46,10 @@ function clearFilter(filter: ActiveFilter) {
 // Carry the current filter query across to the Map view.
 function viewOnMap() {
 	router.push({ name: 'map', query: { ...route.query } })
+}
+
+function viewAnalytics() {
+	router.push({ name: 'analytics', query: { ...route.query } })
 }
 
 // Show a single flight on the Map view.
@@ -306,6 +311,12 @@ async function remove(f: Flight) {
 					</template>
 					View on map
 				</NcButton>
+				<NcButton v-if="activeFilters.length" variant="secondary" @click="viewAnalytics">
+					<template #icon>
+						<ChartBar :size="20" />
+					</template>
+					View analytics
+				</NcButton>
 				<NcButton
 					v-if="selecting"
 					variant="secondary"
@@ -452,11 +463,15 @@ async function remove(f: Flight) {
 	padding: 32px;
 }
 
+/* Same height and margins on Flights, Map and Analytics, whatever the row
+   holds (button, chips only, dropdown), so the action buttons below it sit at
+   the same offset from the heading on all three. */
 .filter-bar {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 10px;
+	min-height: var(--default-clickable-area);
 	margin-top: 8px;
 	margin-bottom: 6px;
 }

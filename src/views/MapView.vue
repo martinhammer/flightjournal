@@ -12,6 +12,7 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import MapMarkerOff from 'vue-material-design-icons/MapMarkerOff.vue'
 import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue'
+import ChartBar from 'vue-material-design-icons/ChartBar.vue'
 import { showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
 import { useMapSettingsStore, type Projection } from '../store/mapSettings.ts'
@@ -157,6 +158,10 @@ function clearFilter(filter: ActiveFilter) {
 // Carry the current filter query across to the Flights view.
 function viewInLog() {
 	router.push({ name: 'flights', query: { ...route.query } })
+}
+
+function viewAnalytics() {
+	router.push({ name: 'analytics', query: { ...route.query } })
 }
 
 function themeColor(name: string, fallback: string): string {
@@ -509,6 +514,12 @@ onBeforeUnmount(() => {
 					</template>
 					View in log
 				</NcButton>
+				<NcButton variant="secondary" @click="viewAnalytics">
+					<template #icon>
+						<ChartBar :size="20" />
+					</template>
+					View analytics
+				</NcButton>
 			</div>
 		</div>
 		<div class="map-area">
@@ -539,11 +550,15 @@ onBeforeUnmount(() => {
 	padding: 16px 16px 0;
 }
 
+/* Same height and margins on Flights, Map and Analytics, whatever the row
+   holds (button, chips only, dropdown), so the action buttons below it sit at
+   the same offset from the heading on all three. */
 .filter-bar {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 10px;
+	min-height: var(--default-clickable-area);
 	margin-top: 8px;
 	margin-bottom: 6px;
 }
