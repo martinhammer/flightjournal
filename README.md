@@ -22,7 +22,7 @@ Future roadmap:
 * Further reference data enrichment
 * Mobile client?
 
-*The app is currently not published on Nextcloud app store. This might change once it reaches a certain level of feature-completeness AND if there is any interest or value in publishing it.*
+**The app is currently NOT published on Nextcloud app store. This might change once it reaches a certain level of feature-completeness AND if there is any interest or value in publishing it.**
 
 Credit to the canonical reference data sets supported by the application:
 * Airports: [mwgg/Airports](https://github.com/mwgg/Airports)
@@ -39,19 +39,24 @@ Feel free to get in touch and/or submit an issue.
 ### Screenshots
 
 Flights screen
-![Screenshot of Flights screen](img/Screenshot_Flights_01_2026-08-25.png)
+![Screenshot of Flights screen](img/Screenshot_Flights_01_2026-10-02.png)
 
 Flights screen with filters and sort applied and filter dialog open 
-![Screenshot of Flights screen with filters](img/Screenshot_Flights_02_2026-08-25.png)
+![Screenshot of Flights screen with filters](img/Screenshot_Flights_02_2026-10-02.png)
 
 Map screen
-![Screenshot of Map screen](img/Screenshot_Map_01_2026-08-25.png)
+![Screenshot of Map screen](img/Screenshot_Map_01_2026-10-02.png)
 
 Map screen filtered for specific airport and using the azimuthal equidistant projection
-![Screenshot of Map screen with filter and azimuthal projection](img/Screenshot_Map_02_2026-08-25.png)
+![Screenshot of Map screen with filter and azimuthal projection](img/Screenshot_Map_02_2026-10-02.png)
+
+Analytics screen
+![Screenshot of Analytics screen](img/Screenshot_Analytics_01_2026-10-02.png)
+
+![Screenshot of Analytics screen](img/Screenshot_Analytics_02_2026-10-02.png)
 
 Personal Settings screen
-![Screenshot of Personal Settings screen](img/Screenshot_Settings_01_2026-08-25.png)
+![Screenshot of Personal Settings screen](img/Screenshot_Settings_01_2026-10-02.png)
 
 Admin Settings screen
-![Screenshot of Admin Settings screen](img/Screenshot_Admin_01_2026-08-25.png)
+![Screenshot of Admin Settings screen](img/Screenshot_Admin_01_2026-10-02.png)
