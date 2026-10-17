@@ -33,7 +33,7 @@
     "proj4": "^2.22.0",
     "proj4leaflet": "^1.0.2",
     "topojson-client": "^3.1.0",
-    "vue": "^3.5.43",
+    "vue": "^3.5.44",
     "vue-chartjs": "^5.3.4",
     "vue-material-design-icons": "^5.3.1",
     "vue-router": "^5.3.1",
