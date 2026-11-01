@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+// Inside a server checkout (CI's phpunit-sqlite job, which removes
+// nextcloud/ocp before running) the server's bootstrap defines OCP\*.
+$serverBootstrap = __DIR__ . '/../../../tests/bootstrap.php';
+if (is_file($serverBootstrap)) {
+	require_once $serverBootstrap;
+}
+
 $autoloader = require_once __DIR__ . '/../vendor/autoload.php';
 
 // nextcloud/ocp ships PHP stubs for the public API but does not register an
