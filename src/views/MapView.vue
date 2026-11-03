@@ -680,8 +680,11 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 }
 
-.fj-map-popup__action:hover {
-	background: var(--color-background-hover);
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.fj-map-popup__action:hover {
+		background: var(--color-background-hover);
+	}
 }
 
 .fj-map-tooltip__title {

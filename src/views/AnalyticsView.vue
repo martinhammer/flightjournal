@@ -964,9 +964,15 @@ h4 {
 	overflow: hidden;
 }
 
-.record--link:hover,
 .record--link:focus-visible {
 	background: var(--color-background-hover);
+}
+
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.record--link:hover {
+		background: var(--color-background-hover);
+	}
 }
 
 .record__main {

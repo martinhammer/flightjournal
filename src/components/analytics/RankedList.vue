@@ -75,9 +75,15 @@ const width = (n: number) => `${Math.max(2, Math.round((n / max.value) * 100))}%
 	text-decoration: none;
 }
 
-.ranked__row--link:hover,
 .ranked__row--link:focus-visible {
 	background: var(--color-background-hover);
+}
+
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.ranked__row--link:hover {
+		background: var(--color-background-hover);
+	}
 }
 
 .ranked__body {

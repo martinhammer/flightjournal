@@ -631,8 +631,11 @@ async function remove(f: Flight) {
 	cursor: pointer;
 }
 
-.sort-button:hover {
-	background-color: var(--color-background-hover);
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.sort-button:hover {
+		background-color: var(--color-background-hover);
+	}
 }
 
 .sort-indicator {
