@@ -1,0 +1,24 @@
+/*
+ * Layout shared by every routed view. Each view puts `fj-view` on its root
+ * (MapView on its header, since the map below it runs edge to edge).
+ */
+
+.fj-view {
+	/* Nextcloud's own --app-navigation-padding is only defined inside the
+	   navigation, so mirror its value here. */
+	--fj-toggle-gap: calc(var(--default-grid-baseline, 4px) * 2);
+	padding: var(--fj-toggle-gap) 16px 16px;
+}
+
+/* The app-navigation toggle (☰) floats over the content's top-left corner at
+   every width, open navigation or not: one gap in from the edge, one
+   clickable area wide. Seat the heading beside it rather than under it, with
+   the same gap after the toggle (gap + toggle + gap, less the 16px the view
+   already pads), and match its top and height so the two share a line. */
+.fj-view > h2:first-child {
+	display: flex;
+	align-items: center;
+	min-height: var(--default-clickable-area);
+	margin-top: 0;
+	padding-inline-start: calc(var(--fj-toggle-gap) * 2 + var(--default-clickable-area) - 16px);
+}

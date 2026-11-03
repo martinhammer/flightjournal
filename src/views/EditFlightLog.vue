@@ -151,7 +151,7 @@ function cancel() {
 </script>
 
 <template>
-	<div class="edit-flight">
+	<div class="edit-flight fj-view">
 		<h2>Edit flight</h2>
 		<form v-if="loaded" @submit.prevent="save">
 			<div class="row">
@@ -201,7 +201,6 @@ function cancel() {
 
 <style scoped>
 .edit-flight {
-	padding: 16px;
 	max-width: 720px;
 }
 

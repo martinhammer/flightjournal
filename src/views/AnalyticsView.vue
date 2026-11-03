@@ -418,7 +418,7 @@ const cssVars = computed(() => themeCssVars(theme.value))
 </script>
 
 <template>
-	<div class="analytics" :style="cssVars">
+	<div class="analytics fj-view" :style="cssVars">
 		<h2>Analytics</h2>
 
 		<div v-if="loading" class="analytics__loading">
@@ -751,7 +751,6 @@ const cssVars = computed(() => themeCssVars(theme.value))
 
 <style scoped>
 .analytics {
-	padding: 16px;
 	max-width: 1200px;
 }
 

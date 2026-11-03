@@ -280,7 +280,7 @@ async function remove(f: Flight) {
 </script>
 
 <template>
-	<div class="view-flight">
+	<div class="view-flight fj-view">
 		<h2>Flight log</h2>
 		<!-- A successful apply clears the selection: under a filter such as
 			 "Unmatched aircraft" the fixed rows drop out of view, and a selection
@@ -453,10 +453,6 @@ async function remove(f: Flight) {
 </template>
 
 <style scoped>
-.view-flight {
-	padding: 16px;
-}
-
 .loader {
 	display: flex;
 	justify-content: center;
@@ -482,9 +478,18 @@ async function remove(f: Flight) {
 
 .filter-actions {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 12px;
 	margin-bottom: 12px;
+}
+
+/* Card breakpoint: keep in step with CARD_BREAKPOINT_PX. On a phone the
+   buttons share each line rather than leaving it ragged. */
+@media (width <= 700px) {
+	.filter-actions > * {
+		flex: 1 1 auto;
+	}
 }
 
 .flight-table {

@@ -151,7 +151,7 @@ function showFlights(t: AircraftType) {
 </script>
 
 <template>
-	<div class="view-aircraft-types">
+	<div class="view-aircraft-types fj-view">
 		<h2>Aircraft types</h2>
 		<div class="controls">
 			<div class="switch-row">
@@ -241,10 +241,6 @@ function showFlights(t: AircraftType) {
 </template>
 
 <style scoped>
-.view-aircraft-types {
-	padding: 16px;
-}
-
 .switch-row {
 	display: flex;
 	flex-wrap: wrap;

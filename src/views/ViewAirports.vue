@@ -161,7 +161,7 @@ function showOnMap(a: Airport) {
 </script>
 
 <template>
-	<div class="view-airports">
+	<div class="view-airports fj-view">
 		<h2>Airports</h2>
 		<div class="controls">
 			<div class="switch-row">
@@ -266,10 +266,6 @@ function showOnMap(a: Airport) {
 </template>
 
 <style scoped>
-.view-airports {
-	padding: 16px;
-}
-
 .switch-row {
 	display: flex;
 	flex-wrap: wrap;

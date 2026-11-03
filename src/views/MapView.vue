@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<div class="map-view">
-		<div class="header">
+		<div class="header fj-view">
 			<h2>Map</h2>
 			<div class="filter-bar">
 				<NcChip
@@ -546,8 +546,10 @@ onBeforeUnmount(() => {
 	height: calc(100vh - var(--header-height, 50px));
 }
 
+/* .fj-view supplies the padding; the map below starts right under the
+   header. */
 .header {
-	padding: 16px 16px 0;
+	padding-bottom: 0;
 }
 
 /* Same height and margins on Flights, Map and Analytics, whatever the row
@@ -569,9 +571,18 @@ onBeforeUnmount(() => {
 
 .filter-actions {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 12px;
 	margin-bottom: 12px;
+}
+
+/* Card breakpoint: keep in step with CARD_BREAKPOINT_PX. On a phone the
+   buttons share each line rather than leaving it ragged. */
+@media (width <= 700px) {
+	.filter-actions > * {
+		flex: 1 1 auto;
+	}
 }
 
 .map-area {
