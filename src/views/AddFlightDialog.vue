@@ -172,4 +172,18 @@ async function add() {
 .row.half > * {
 	grid-column: 1;
 }
+
+/* Phones: one field per line. A half-width field at 360px leaves under 150px,
+   too narrow for an airport name or the aircraft feedback line under its
+   input. */
+@media (width <= 600px) {
+	.row.two,
+	.row.half {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.row.half > * {
+		grid-column: 1 / -1;
+	}
+}
 </style>
