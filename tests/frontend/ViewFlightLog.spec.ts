@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -494,5 +494,165 @@ describe('ViewFlightLog bulk edit', () => {
 		await nextTick()
 		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
 		wrapper.unmount()
+	})
+})
+
+// Card mode is decided by matchMedia (useCardLayout), which jsdom lacks; every
+// other describe block therefore runs in the desktop table layout.
+function mockCardLayout() {
+	window.matchMedia = vi.fn().mockReturnValue({
+		matches: true,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	}) as unknown as typeof window.matchMedia
+}
+
+describe('ViewFlightLog card layout', () => {
+	// Default sort is date desc, so rows read f3, f2, f1 top to bottom.
+	const rows = (wrapper: ReturnType<typeof render>) => wrapper.findAll('tbody tr')
+	const rowBoxes = (wrapper: ReturnType<typeof render>) => wrapper.findAll('tbody .select-box')
+	const dates = (wrapper: ReturnType<typeof render>) => rows(wrapper).map((r) => r.find('td.date').text())
+	const sortItems = (wrapper: ReturnType<typeof render>) => wrapper.findAll('.sort-menu .row-action')
+
+	beforeEach(mockCardLayout)
+	afterEach(() => {
+		// @ts-expect-error jsdom has no matchMedia; put that back.
+		delete window.matchMedia
+	})
+
+	it('opens the editor on a tap, carrying the active filter', async () => {
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		const wrapper = render()
+		await rows(wrapper)[0].find('td.route').trigger('click')
+		expect(push).toHaveBeenCalledWith({
+			path: '/flights/3/edit',
+			query: { airport: 'LHR', airportDir: 'to' },
+		})
+	})
+
+	it('toggles the tapped card instead while a selection is active', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		await rows(wrapper)[1].find('td.route').trigger('click')
+		expect(push).not.toHaveBeenCalled()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 2 selected')
+
+		await rows(wrapper)[1].find('td.route').trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+	})
+
+	it('leaves a tap on the checkbox to the checkbox', async () => {
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(push).not.toHaveBeenCalled()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+	})
+
+	it('leaves a tap on the row menu to the menu', async () => {
+		const wrapper = render()
+		await rows(wrapper)[0].find('td.actions').trigger('click')
+		expect(push).not.toHaveBeenCalled()
+	})
+
+	it('does not act again on a double tap', async () => {
+		const wrapper = render()
+		await rows(wrapper)[0].trigger('dblclick')
+		expect(push).not.toHaveBeenCalled()
+	})
+
+	it('does not treat a click as a tap in the table layout', async () => {
+		// @ts-expect-error back to jsdom's missing matchMedia: the table layout.
+		delete window.matchMedia
+		const wrapper = render()
+		await rows(wrapper)[0].find('td.route').trigger('click')
+		expect(push).not.toHaveBeenCalled()
+		expect(wrapper.find('.sort-menu').exists()).toBe(false)
+	})
+
+	it('sorts from the sort menu, and re-picking the active column reverses it', async () => {
+		const wrapper = render()
+		expect(dates(wrapper)).toEqual(['2026-01-03', '2026-01-02', '2026-01-01'])
+		// Menu order follows the columns: Date, Flight, Route, Distance, …
+		await sortItems(wrapper)[0].trigger('click')
+		expect(dates(wrapper)).toEqual(['2026-01-01', '2026-01-02', '2026-01-03'])
+		await sortItems(wrapper)[0].trigger('click')
+		expect(dates(wrapper)).toEqual(['2026-01-03', '2026-01-02', '2026-01-01'])
+	})
+
+	it('picks a new column in its default direction', async () => {
+		const wrapper = render()
+		// Distance defaults to longest first; f1 and f2 tie at 5555 and fall back to id.
+		await sortItems(wrapper)[3].trigger('click')
+		expect(dates(wrapper)).toEqual(['2026-01-01', '2026-01-02', '2026-01-03'])
+	})
+
+	it('offers "Select all shown" only while selecting, selecting exactly the visible rows', async () => {
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		const wrapper = render()
+		expect(wrapper.find('.select-all-shown').exists()).toBe(false)
+		await rowBoxes(wrapper)[0].trigger('click')
+		await wrapper.find('.select-all-shown').trigger('click')
+		expect(wrapper.find('.filter-count').text()).toBe('2 of 3 flights · 2 selected')
+		expect(rows(wrapper).every((r) => r.classes('selected'))).toBe(true)
+	})
+
+	it('does not offer "Select all shown" in the table layout, which has the header box', async () => {
+		// @ts-expect-error back to the table layout.
+		delete window.matchMedia
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		expect(wrapper.find('.select-all-shown').exists()).toBe(false)
+	})
+})
+
+describe('ViewFlightLog within-day reordering from the row menu', () => {
+	function sameDay(id: number, daySeq: number) {
+		return { ...flight(id, 'AAA', 'BBB'), flightDate: '2026-03-15', daySeq }
+	}
+	const rowMenu = (wrapper: ReturnType<typeof render>, rowIndex: number) => wrapper.findAll('tbody tr')[rowIndex]
+
+	beforeEach(() => {
+		store.flights = [sameDay(1, 1), sameDay(2, 2), sameDay(3, 3)]
+	})
+
+	it('offers each move only where the matching chevron is enabled', () => {
+		const wrapper = render()
+		expect(rowMenu(wrapper, 0).find('.move-up').exists()).toBe(false)
+		expect(rowMenu(wrapper, 0).find('.move-down').exists()).toBe(true)
+		expect(rowMenu(wrapper, 2).find('.move-up').exists()).toBe(true)
+		expect(rowMenu(wrapper, 2).find('.move-down').exists()).toBe(false)
+	})
+
+	it('offers no moves on a single-leg day', () => {
+		store.flights = [flight(1, 'AAA', 'BBB'), flight(2, 'CCC', 'DDD')]
+		const wrapper = render()
+		expect(wrapper.find('.move-up').exists()).toBe(false)
+		expect(wrapper.find('.move-down').exists()).toBe(false)
+	})
+
+	it('"Move up" sends "later" under newest-first sort, like the up chevron', async () => {
+		const wrapper = render()
+		await rowMenu(wrapper, 1).find('.move-up').trigger('click')
+		expect(store.move).toHaveBeenCalledWith(2, 'later')
+	})
+
+	it('"Move down" sends "earlier" under newest-first sort', async () => {
+		const wrapper = render()
+		await rowMenu(wrapper, 1).find('.move-down').trigger('click')
+		expect(store.move).toHaveBeenCalledWith(2, 'earlier')
+	})
+
+	it('flips the mapping when the date sort is ascending', async () => {
+		const wrapper = render()
+		await wrapper.findAll('th .sort-button')[0].trigger('click')
+		await rowMenu(wrapper, 1).find('.move-up').trigger('click')
+		expect(store.move).toHaveBeenCalledWith(2, 'earlier')
+	})
+
+	it('hides the moves while a filter is active', () => {
+		routeHolder.query = { airport: 'AAA', airportDir: 'from' }
+		const wrapper = render()
+		expect(wrapper.find('.move-up').exists()).toBe(false)
+		expect(wrapper.find('.move-down').exists()).toBe(false)
 	})
 })
