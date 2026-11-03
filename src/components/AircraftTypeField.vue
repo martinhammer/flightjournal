@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<div ref="rootEl" class="aircraft-field">
+	<div ref="rootEl" class="aircraft-field" data-fj-reveal>
 		<NcTextField
 			label="Aircraft type"
 			:model-value="raw ?? ''"

@@ -513,6 +513,7 @@ describe('ViewFlightLog card layout', () => {
 	const rowBoxes = (wrapper: ReturnType<typeof render>) => wrapper.findAll('tbody .select-box')
 	const dates = (wrapper: ReturnType<typeof render>) => rows(wrapper).map((r) => r.find('td.date').text())
 	const sortItems = (wrapper: ReturnType<typeof render>) => wrapper.findAll('.sort-menu .row-action')
+	const enterSelectMode = (wrapper: ReturnType<typeof render>) => wrapper.find('.enter-select-mode').trigger('click')
 
 	beforeEach(mockCardLayout)
 	afterEach(() => {
@@ -530,19 +531,97 @@ describe('ViewFlightLog card layout', () => {
 		})
 	})
 
-	it('toggles the tapped card instead while a selection is active', async () => {
+	it('shows no checkboxes until "Select" turns select mode on', async () => {
 		const wrapper = render()
-		await rowBoxes(wrapper)[0].trigger('click')
+		expect(rowBoxes(wrapper)).toHaveLength(0)
+		expect(wrapper.find('.select-cancel').exists()).toBe(false)
+
+		await enterSelectMode(wrapper)
+		expect(rowBoxes(wrapper)).toHaveLength(3)
+		expect(wrapper.find('.enter-select-mode').exists()).toBe(false)
+		expect(wrapper.find('.select-cancel').exists()).toBe(true)
+		expect(wrapper.find('.clear-selection').exists()).toBe(false)
+	})
+
+	it('toggles the tapped card in select mode, even with nothing selected', async () => {
+		const wrapper = render()
+		await enterSelectMode(wrapper)
 		await rows(wrapper)[1].find('td.route').trigger('click')
 		expect(push).not.toHaveBeenCalled()
-		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 2 selected')
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+		expect(wrapper.find('.bulk-edit').exists()).toBe(true)
 
+		// Emptying the selection stays in the mode: the next tap toggles again.
 		await rows(wrapper)[1].find('td.route').trigger('click')
+		expect(wrapper.find('.bulk-edit').exists()).toBe(false)
+		await rows(wrapper)[0].find('td.route').trigger('click')
+		expect(push).not.toHaveBeenCalled()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+	})
+
+	it('"Cancel" leaves select mode and clears the selection', async () => {
+		const wrapper = render()
+		await enterSelectMode(wrapper)
+		await rowBoxes(wrapper)[0].trigger('click')
+		await wrapper.find('.select-cancel').trigger('click')
+		expect(rowBoxes(wrapper)).toHaveLength(0)
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
+		expect(wrapper.find('.enter-select-mode').exists()).toBe(true)
+
+		await rows(wrapper)[0].find('td.route').trigger('click')
+		expect(push).toHaveBeenCalledWith({ path: '/flights/3/edit', query: {} })
+	})
+
+	it('leaves select mode on a filter change', async () => {
+		const wrapper = render()
+		await enterSelectMode(wrapper)
+		await rowBoxes(wrapper)[0].trigger('click')
+		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
+		await nextTick()
+		expect(rowBoxes(wrapper)).toHaveLength(0)
+		expect(wrapper.find('.select-cancel').exists()).toBe(false)
+		expect(wrapper.find('.enter-select-mode').exists()).toBe(true)
+	})
+
+	it('leaves select mode on a successful bulk apply', async () => {
+		const wrapper = render()
+		await enterSelectMode(wrapper)
+		await rowBoxes(wrapper)[0].trigger('click')
+		await wrapper.findComponent({ name: 'BulkEditDialog' }).vm.$emit('saved')
+		await nextTick()
+		expect(rowBoxes(wrapper)).toHaveLength(0)
+		expect(wrapper.find('.enter-select-mode').exists()).toBe(true)
+	})
+
+	it('leaves select mode on Esc, even with nothing selected', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await enterSelectMode(wrapper)
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+		await nextTick()
+		expect(rowBoxes(wrapper)).toHaveLength(0)
+		expect(wrapper.find('.enter-select-mode').exists()).toBe(true)
+		wrapper.unmount()
+	})
+
+	it('arrives in select mode when a selection is carried into the card layout', async () => {
+		let onChange: (e: { matches: boolean }) => void = () => {}
+		window.matchMedia = vi.fn().mockReturnValue({
+			matches: false,
+			addEventListener: (_: string, fn: typeof onChange) => { onChange = fn },
+			removeEventListener: vi.fn(),
+		}) as unknown as typeof window.matchMedia
+		const wrapper = render()
+		await rowBoxes(wrapper)[0].trigger('click')
+		onChange({ matches: true })
+		await nextTick()
+		expect(rowBoxes(wrapper)).toHaveLength(3)
+		expect(wrapper.find('.select-cancel').exists()).toBe(true)
 		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
 	})
 
 	it('leaves a tap on the checkbox to the checkbox', async () => {
 		const wrapper = render()
+		await enterSelectMode(wrapper)
 		await rowBoxes(wrapper)[0].trigger('click')
 		expect(push).not.toHaveBeenCalled()
 		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
@@ -586,11 +665,11 @@ describe('ViewFlightLog card layout', () => {
 		expect(dates(wrapper)).toEqual(['2026-01-01', '2026-01-02', '2026-01-03'])
 	})
 
-	it('offers "Select all shown" only while selecting, selecting exactly the visible rows', async () => {
+	it('offers "Select all shown" only in select mode, selecting exactly the visible rows', async () => {
 		routeHolder.query = { airport: 'LHR', airportDir: 'to' }
 		const wrapper = render()
 		expect(wrapper.find('.select-all-shown').exists()).toBe(false)
-		await rowBoxes(wrapper)[0].trigger('click')
+		await enterSelectMode(wrapper)
 		await wrapper.find('.select-all-shown').trigger('click')
 		expect(wrapper.find('.filter-count').text()).toBe('2 of 3 flights · 2 selected')
 		expect(rows(wrapper).every((r) => r.classes('selected'))).toBe(true)
@@ -600,8 +679,11 @@ describe('ViewFlightLog card layout', () => {
 		// @ts-expect-error back to the table layout.
 		delete window.matchMedia
 		const wrapper = render()
+		expect(wrapper.find('.enter-select-mode').exists()).toBe(false)
 		await rowBoxes(wrapper)[0].trigger('click')
 		expect(wrapper.find('.select-all-shown').exists()).toBe(false)
+		expect(wrapper.find('.select-cancel').exists()).toBe(false)
+		expect(wrapper.find('.clear-selection').exists()).toBe(true)
 	})
 })
 

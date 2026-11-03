@@ -25,6 +25,7 @@ import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
 import Map from 'vue-material-design-icons/Map.vue'
 import ChartBar from 'vue-material-design-icons/ChartBar.vue'
 import CheckAll from 'vue-material-design-icons/CheckAll.vue'
+import CheckboxMultipleMarkedOutline from 'vue-material-design-icons/CheckboxMultipleMarkedOutline.vue'
 import { useCardLayout } from '../useCardLayout.ts'
 
 type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
@@ -180,12 +181,26 @@ const selectedFlights = computed<Flight[]>(() => visibleFlights.value.filter((f)
 const selecting = computed(() => selectedFlights.value.length > 0)
 const allSelected = computed(() => selecting.value && selectedFlights.value.length === visibleFlights.value.length)
 
+// In the card layout selecting is a mode turned on with "Select": the
+// checkboxes would otherwise take a column's width on every card for a rarely
+// used feature. The table layout ignores it (hover reveals the boxes there).
+const selectMode = ref(false)
+
+// Every path that clears the selection — filter change, successful bulk apply,
+// Esc, "Cancel" — also leaves the mode.
 function clearSelection() {
 	selected.value = new Set()
 	anchorId = null
+	selectMode.value = false
 }
 
 const bulkEditOpen = ref(false)
+
+// A selection carried into the card layout (a phone rotated to portrait) needs
+// its checkboxes and its "Cancel", so it arrives in select mode.
+watch(cardLayout, (cards) => {
+	if (cards && selecting.value) selectMode.value = true
+})
 
 // The route query on this view holds nothing but filters, so any change to it
 // is a filter change.
@@ -229,7 +244,7 @@ function toggleAll(checked: boolean) {
 // Esc also closes the bulk-edit dialog; that press must not clear the selection
 // it is editing.
 function onKeydown(e: KeyboardEvent) {
-	if (e.key === 'Escape' && selecting.value && !bulkEditOpen.value) clearSelection()
+	if (e.key === 'Escape' && (selecting.value || selectMode.value) && !bulkEditOpen.value) clearSelection()
 }
 
 const headerCount = computed(() => {
@@ -266,7 +281,7 @@ function edit(f: Flight) {
 }
 
 // A phone sends no reliable double-click (a double tap zooms), so in the card
-// layout a tap on the card stands in for it — or, while selecting, toggles the
+// layout a tap on the card stands in for it — or, in select mode, toggles the
 // card's selection as Mail does. The checkbox and the row menu keep their own
 // meaning.
 // The card layout's tap already acts; a double tap must not act again (while
@@ -278,7 +293,7 @@ function onRowDblclick(f: Flight) {
 function onRowClick(f: Flight, e: MouseEvent) {
 	if (!cardLayout.value) return
 	if ((e.target as Element | null)?.closest('td.select, td.actions')) return
-	if (selecting.value) toggleRow(f, !selected.value.has(f.id))
+	if (selectMode.value) toggleRow(f, !selected.value.has(f.id))
 	else edit(f)
 }
 
@@ -327,6 +342,16 @@ async function remove(f: Flight) {
 					:sort-key="sortKey"
 					:sort-dir="sortDir"
 					@sort="setSort" />
+				<NcButton
+					v-if="cardLayout && !selectMode"
+					variant="tertiary"
+					class="enter-select-mode"
+					@click="selectMode = true">
+					<template #icon>
+						<CheckboxMultipleMarkedOutline :size="20" />
+					</template>
+					Select
+				</NcButton>
 				<NcChip
 					v-for="filter in activeFilters"
 					:key="filter.id"
@@ -334,7 +359,7 @@ async function remove(f: Flight) {
 					@close="clearFilter(filter)" />
 				<span class="filter-count">{{ headerCount }}</span>
 			</div>
-			<div v-if="activeFilters.length || selecting" class="filter-actions">
+			<div v-if="activeFilters.length || selecting || (cardLayout && selectMode)" class="filter-actions">
 				<NcButton v-if="activeFilters.length" variant="secondary" @click="viewOnMap">
 					<template #icon>
 						<Map :size="20" />
@@ -360,7 +385,7 @@ async function remove(f: Flight) {
 				<!-- Stands in for the header checkbox, hidden with the header in
 					 the card layout. -->
 				<NcButton
-					v-if="selecting && cardLayout"
+					v-if="cardLayout && selectMode"
 					variant="tertiary"
 					class="select-all-shown"
 					:disabled="allSelected"
@@ -371,7 +396,17 @@ async function remove(f: Flight) {
 					Select all shown
 				</NcButton>
 				<NcButton
-					v-if="selecting"
+					v-if="cardLayout && selectMode"
+					variant="tertiary"
+					class="select-cancel"
+					@click="clearSelection">
+					<template #icon>
+						<Close :size="20" />
+					</template>
+					Cancel
+				</NcButton>
+				<NcButton
+					v-else-if="selecting && !cardLayout"
 					variant="tertiary"
 					class="clear-selection"
 					@click="clearSelection">
@@ -394,7 +429,7 @@ async function remove(f: Flight) {
 			<table
 				v-else
 				class="flight-table"
-				:class="{ selecting }"
+				:class="{ selecting, 'select-mode': cardLayout && selectMode }"
 				role="table">
 				<thead role="rowgroup">
 					<tr role="row">
@@ -440,7 +475,10 @@ async function remove(f: Flight) {
 							@click.capture="noteShift"
 							@mousedown="suppressTextSelection"
 							@dblclick.stop>
+							<!-- Not rendered in the card layout outside select mode, so
+								 the cell is :empty and the card takes the full width. -->
 							<NcCheckboxRadioSwitch
+								v-if="!cardLayout || selectMode"
 								:model-value="selected.has(f.id)"
 								:aria-label="`Select flight on ${f.flightDate}, ${routeLabel(f)}`"
 								@update:model-value="toggleRow(f, $event)" />
@@ -739,9 +777,15 @@ async function remove(f: Flight) {
 		row-gap: 2px;
 		min-height: var(--fj-card-action);
 		padding-block: 10px;
-		padding-inline: calc(var(--default-clickable-area) + 4px) calc(var(--fj-card-action) + 4px);
+		padding-inline: 8px calc(var(--fj-card-action) + 4px);
 		border-bottom: 1px solid var(--color-border);
 		cursor: pointer;
+	}
+
+	/* Room for the checkbox only in select mode (D7); otherwise its cell is
+	   empty and hidden, overriding the (hover: none) always-show rule. */
+	.flight-table.select-mode tr {
+		padding-inline-start: calc(var(--default-clickable-area) + 4px);
 	}
 
 	.flight-table tr::before,

@@ -22,3 +22,22 @@
 	margin-top: 0;
 	padding-inline-start: calc(var(--fj-toggle-gap) * 2 + var(--default-clickable-area) - 16px);
 }
+
+/* Below 513px @nextcloud/vue shows a dialog full screen, sized to the layout
+   viewport, which the on-screen keyboard does not shrink: take off the height
+   the keyboard covers (src/keyboardInset.ts) so the dialog's own scroller ends
+   above it and the field being typed in can be scrolled into view. The query
+   and the height formula mirror NcModal's; `body` outranks its scoped rule.
+   Small dialogs (confirmations) keep their own, higher-specificity sizing. */
+@media only screen and ((max-width: 512px) or (max-height: 400px)) {
+	body .modal-mask .modal-wrapper .modal-container {
+		height: calc(100% - var(--modal-header-offset) - var(--fj-keyboard-inset, 0px));
+	}
+}
+
+/* Keep a field scrolled into view clear of the dialog's edges, with its border
+   and focus ring, whether we scroll it (keyboardInset.ts) or the browser does
+   on focus; both honour scroll-padding. */
+.dialog__content {
+	scroll-padding-block: 16px;
+}
