@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<div ref="rootEl" class="aircraft-field">
+	<div ref="rootEl" class="aircraft-field" data-fj-reveal>
 		<NcTextField
 			label="Aircraft type"
 			:model-value="raw ?? ''"
@@ -216,9 +216,15 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 }
 
-.suggestion:hover,
 .suggestion--active {
 	background-color: var(--color-background-hover);
+}
+
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.suggestion:hover {
+		background-color: var(--color-background-hover);
+	}
 }
 
 .suggestion__code {

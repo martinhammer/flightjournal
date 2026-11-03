@@ -234,7 +234,8 @@ async function apply() {
 			<div v-for="field in FIELDS"
 				:key="field.key"
 				class="field"
-				:data-field="field.key">
+				:data-field="field.key"
+				data-fj-reveal>
 				<NcCheckboxRadioSwitch
 					type="switch"
 					:model-value="enabled[field.key]"

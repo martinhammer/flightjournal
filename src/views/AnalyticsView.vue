@@ -418,7 +418,7 @@ const cssVars = computed(() => themeCssVars(theme.value))
 </script>
 
 <template>
-	<div class="analytics" :style="cssVars">
+	<div class="analytics fj-view" :style="cssVars">
 		<h2>Analytics</h2>
 
 		<div v-if="loading" class="analytics__loading">
@@ -751,7 +751,6 @@ const cssVars = computed(() => themeCssVars(theme.value))
 
 <style scoped>
 .analytics {
-	padding: 16px;
 	max-width: 1200px;
 }
 
@@ -820,7 +819,9 @@ h4 {
 
 .tiles {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	/* 140px, not wider: two tiles and the gap must fit the 328px a 360px
+	   phone leaves, or every tile stacks one per row. */
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 	gap: 16px;
 }
 
@@ -843,6 +844,14 @@ h4 {
 
 .tile__label {
 	font-size: 13px;
+}
+
+/* At two tiles per row on a small phone a tile holds about 116px of text,
+   less than a seven-digit distance needs at 28px. */
+@media (width <= 400px) {
+	.tile__value {
+		font-size: 22px;
+	}
 }
 
 .tile__delta {
@@ -955,9 +964,15 @@ h4 {
 	overflow: hidden;
 }
 
-.record--link:hover,
 .record--link:focus-visible {
 	background: var(--color-background-hover);
+}
+
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.record--link:hover {
+		background: var(--color-background-hover);
+	}
 }
 
 .record__main {

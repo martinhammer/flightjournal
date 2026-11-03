@@ -19,10 +19,14 @@ import { showConfirmation, showError } from '@nextcloud/dialogs'
 import { useFlightsStore } from '../store/flights.ts'
 import BulkEditDialog from '../components/BulkEditDialog.vue'
 import FilterPicker from '../components/FilterPicker.vue'
+import SortMenu, { type SortColumn } from '../components/SortMenu.vue'
 import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
 import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
 import Map from 'vue-material-design-icons/Map.vue'
 import ChartBar from 'vue-material-design-icons/ChartBar.vue'
+import CheckAll from 'vue-material-design-icons/CheckAll.vue'
+import CheckboxMultipleMarkedOutline from 'vue-material-design-icons/CheckboxMultipleMarkedOutline.vue'
+import { useCardLayout } from '../useCardLayout.ts'
 
 type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
 type SortDir = 'asc' | 'desc'
@@ -34,6 +38,8 @@ const cabinLabels: Record<string, string> = Object.fromEntries(
 const router = useRouter()
 const route = useRoute()
 const store = useFlightsStore()
+// Narrow screens show each row as a card; see the card rules in the styles.
+const cardLayout = useCardLayout()
 
 const activeFilters = computed<ActiveFilter[]>(() => buildFilters(route.query, store.flights))
 
@@ -66,11 +72,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 const sortKey = ref<SortKey>('date')
 const sortDir = ref<SortDir>('desc')
 
-const columns: { key: SortKey; label: string; defaultDir: SortDir }[] = [
-	{ key: 'date', label: 'Date', defaultDir: 'desc' },
+const columns: (SortColumn<SortKey> & { defaultDir: SortDir })[] = [
+	{ key: 'date', label: 'Date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
 	{ key: 'flight', label: 'Flight', defaultDir: 'asc' },
 	{ key: 'route', label: 'Route', defaultDir: 'asc' },
-	{ key: 'distance', label: 'Distance (km)', defaultDir: 'desc' },
+	{ key: 'distance', label: 'Distance (km)', defaultDir: 'desc', ascLabel: 'Shortest first', descLabel: 'Longest first' },
 	{ key: 'aircraft', label: 'Aircraft', defaultDir: 'asc' },
 	{ key: 'registration', label: 'Reg.', defaultDir: 'asc' },
 	{ key: 'cabin', label: 'Cabin', defaultDir: 'asc' },
@@ -175,12 +181,26 @@ const selectedFlights = computed<Flight[]>(() => visibleFlights.value.filter((f)
 const selecting = computed(() => selectedFlights.value.length > 0)
 const allSelected = computed(() => selecting.value && selectedFlights.value.length === visibleFlights.value.length)
 
+// In the card layout selecting is a mode turned on with "Select": the
+// checkboxes would otherwise take a column's width on every card for a rarely
+// used feature. The table layout ignores it (hover reveals the boxes there).
+const selectMode = ref(false)
+
+// Every path that clears the selection — filter change, successful bulk apply,
+// Esc, "Cancel" — also leaves the mode.
 function clearSelection() {
 	selected.value = new Set()
 	anchorId = null
+	selectMode.value = false
 }
 
 const bulkEditOpen = ref(false)
+
+// A selection carried into the card layout (a phone rotated to portrait) needs
+// its checkboxes and its "Cancel", so it arrives in select mode.
+watch(cardLayout, (cards) => {
+	if (cards && selecting.value) selectMode.value = true
+})
 
 // The route query on this view holds nothing but filters, so any change to it
 // is a filter change.
@@ -224,7 +244,7 @@ function toggleAll(checked: boolean) {
 // Esc also closes the bulk-edit dialog; that press must not clear the selection
 // it is editing.
 function onKeydown(e: KeyboardEvent) {
-	if (e.key === 'Escape' && selecting.value && !bulkEditOpen.value) clearSelection()
+	if (e.key === 'Escape' && (selecting.value || selectMode.value) && !bulkEditOpen.value) clearSelection()
 }
 
 const headerCount = computed(() => {
@@ -260,6 +280,23 @@ function edit(f: Flight) {
 	router.push({ path: `/flights/${f.id}/edit`, query: route.query })
 }
 
+// A phone sends no reliable double-click (a double tap zooms), so in the card
+// layout a tap on the card stands in for it — or, in select mode, toggles the
+// card's selection as Mail does. The checkbox and the row menu keep their own
+// meaning.
+// The card layout's tap already acts; a double tap must not act again (while
+// selecting it would toggle twice and then open the editor).
+function onRowDblclick(f: Flight) {
+	if (!cardLayout.value) edit(f)
+}
+
+function onRowClick(f: Flight, e: MouseEvent) {
+	if (!cardLayout.value) return
+	if ((e.target as Element | null)?.closest('td.select, td.actions')) return
+	if (selectMode.value) toggleRow(f, !selected.value.has(f.id))
+	else edit(f)
+}
+
 async function remove(f: Flight) {
 	const origin = f.originLabel || f.originCode || '?'
 	const destination = f.destinationLabel || f.destinationCode || '?'
@@ -280,7 +317,7 @@ async function remove(f: Flight) {
 </script>
 
 <template>
-	<div class="view-flight">
+	<div class="view-flight fj-view">
 		<h2>Flight log</h2>
 		<!-- A successful apply clears the selection: under a filter such as
 			 "Unmatched aircraft" the fixed rows drop out of view, and a selection
@@ -297,6 +334,24 @@ async function remove(f: Flight) {
 		<template v-else>
 			<div class="filter-bar">
 				<FilterPicker :flights="store.flights" />
+				<!-- The card layout hides the header row, and with it the sort
+					 buttons. -->
+				<SortMenu
+					v-if="cardLayout"
+					:columns="columns"
+					:sort-key="sortKey"
+					:sort-dir="sortDir"
+					@sort="setSort" />
+				<NcButton
+					v-if="cardLayout && !selectMode"
+					variant="tertiary"
+					class="enter-select-mode"
+					@click="selectMode = true">
+					<template #icon>
+						<CheckboxMultipleMarkedOutline :size="20" />
+					</template>
+					Select
+				</NcButton>
 				<NcChip
 					v-for="filter in activeFilters"
 					:key="filter.id"
@@ -304,7 +359,7 @@ async function remove(f: Flight) {
 					@close="clearFilter(filter)" />
 				<span class="filter-count">{{ headerCount }}</span>
 			</div>
-			<div v-if="activeFilters.length || selecting" class="filter-actions">
+			<div v-if="activeFilters.length || selecting || (cardLayout && selectMode)" class="filter-actions">
 				<NcButton v-if="activeFilters.length" variant="secondary" @click="viewOnMap">
 					<template #icon>
 						<Map :size="20" />
@@ -327,8 +382,31 @@ async function remove(f: Flight) {
 					</template>
 					Edit {{ selectedFlights.length }} flight{{ selectedFlights.length === 1 ? '' : 's' }}…
 				</NcButton>
+				<!-- Stands in for the header checkbox, hidden with the header in
+					 the card layout. -->
 				<NcButton
-					v-if="selecting"
+					v-if="cardLayout && selectMode"
+					variant="tertiary"
+					class="select-all-shown"
+					:disabled="allSelected"
+					@click="toggleAll(true)">
+					<template #icon>
+						<CheckAll :size="20" />
+					</template>
+					Select all shown
+				</NcButton>
+				<NcButton
+					v-if="cardLayout && selectMode"
+					variant="tertiary"
+					class="select-cancel"
+					@click="clearSelection">
+					<template #icon>
+						<Close :size="20" />
+					</template>
+					Cancel
+				</NcButton>
+				<NcButton
+					v-else-if="selecting && !cardLayout"
 					variant="tertiary"
 					class="clear-selection"
 					@click="clearSelection">
@@ -346,17 +424,27 @@ async function remove(f: Flight) {
 				v-else-if="visibleFlights.length === 0"
 				name="No matching flights"
 				description="No flights match the current filter." />
-			<table v-else class="flight-table" :class="{ selecting }">
-				<thead>
-					<tr>
-						<th class="select">
+			<!-- Explicit roles: the card layout changes these elements' display,
+				 which can strip their table semantics in some browsers. -->
+			<table
+				v-else
+				class="flight-table"
+				:class="{ selecting, 'select-mode': cardLayout && selectMode }"
+				role="table">
+				<thead role="rowgroup">
+					<tr role="row">
+						<th class="select" role="columnheader">
 							<NcCheckboxRadioSwitch
 								:model-value="allSelected"
 								:indeterminate="selecting && !allSelected"
 								aria-label="Select all shown flights"
 								@update:model-value="toggleAll" />
 						</th>
-						<th v-for="col in columns" :key="col.key" :class="{ sorted: sortKey === col.key, numeric: col.key === 'distance' }">
+						<th
+							v-for="col in columns"
+							:key="col.key"
+							:class="{ sorted: sortKey === col.key, numeric: col.key === 'distance' }"
+							role="columnheader">
 							<button
 								type="button"
 								class="sort-button"
@@ -369,37 +457,59 @@ async function remove(f: Flight) {
 								</span>
 							</button>
 						</th>
-						<th />
-						<th />
+						<th role="columnheader" aria-label="Reorder" />
+						<th role="columnheader" aria-label="Actions" />
 					</tr>
 				</thead>
-				<tbody>
+				<tbody role="rowgroup">
 					<tr
 						v-for="(f, i) in visibleFlights"
 						:key="f.id"
 						:class="{ selected: selected.has(f.id) }"
-						@dblclick="edit(f)">
+						role="row"
+						@click="onRowClick(f, $event)"
+						@dblclick="onRowDblclick(f)">
 						<td
 							class="select"
+							role="cell"
 							@click.capture="noteShift"
 							@mousedown="suppressTextSelection"
 							@dblclick.stop>
+							<!-- Not rendered in the card layout outside select mode, so
+								 the cell is :empty and the card takes the full width. -->
 							<NcCheckboxRadioSwitch
+								v-if="!cardLayout || selectMode"
 								:model-value="selected.has(f.id)"
 								:aria-label="`Select flight on ${f.flightDate}, ${routeLabel(f)}`"
 								@update:model-value="toggleRow(f, $event)" />
 						</td>
-						<td>{{ f.flightDate }}</td>
-						<td>{{ flightNo(f) }}</td>
-						<td>{{ routeLabel(f) }}</td>
-						<td class="numeric">
+						<!-- An unset value must leave its cell :empty (the card layout
+							 hides it): render '' rather than a placeholder. -->
+						<td class="date" role="cell">
+							{{ f.flightDate }}
+						</td>
+						<td class="flight detail" role="cell">
+							{{ flightNo(f) }}
+						</td>
+						<td class="route" role="cell">
+							{{ routeLabel(f) }}
+						</td>
+						<td class="numeric distance detail" role="cell">
 							{{ f.distanceKm?.toLocaleString() ?? '' }}
 						</td>
-						<td>{{ aircraftDisplay(f) ?? '' }}</td>
-						<td>{{ f.registration ?? '' }}</td>
-						<td>{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}</td>
-						<td>{{ f.seat ?? '' }}</td>
-						<td class="reorder" @dblclick.stop>
+						<td class="aircraft" role="cell">
+							{{ aircraftDisplay(f) ?? '' }}
+						</td>
+						<td class="registration" role="cell">
+							{{ f.registration ?? '' }}
+						</td>
+						<td class="cabin detail" role="cell">
+							{{ f.cabinClass ? cabinLabels[f.cabinClass] ?? f.cabinClass : '' }}
+						</td>
+						<td class="seat detail" role="cell">
+							{{ f.seat ?? '' }}
+						</td>
+						<td class="reorder" role="cell" @dblclick.stop>
 							<div v-if="hasDaySiblings(i)" class="reorder-controls">
 								<NcButton
 									variant="tertiary-no-background"
@@ -423,7 +533,7 @@ async function remove(f: Flight) {
 								</NcButton>
 							</div>
 						</td>
-						<td class="actions" @dblclick.stop>
+						<td class="actions" role="cell" @dblclick.stop>
 							<NcActions :force-menu="true">
 								<NcActionButton @click="viewFlightOnMap(f)">
 									<template #icon>
@@ -436,6 +546,21 @@ async function remove(f: Flight) {
 										<Pencil :size="20" />
 									</template>
 									Edit
+								</NcActionButton>
+								<!-- The chevrons' menu twins: the only way to reorder in
+									 the card layout (which hides the chevrons), and a
+									 keyboard path everywhere. -->
+								<NcActionButton v-if="canMoveUp(i)" class="move-up" @click="move(f, true)">
+									<template #icon>
+										<ChevronUp :size="20" />
+									</template>
+									Move up within the day
+								</NcActionButton>
+								<NcActionButton v-if="canMoveDown(i)" class="move-down" @click="move(f, false)">
+									<template #icon>
+										<ChevronDown :size="20" />
+									</template>
+									Move down within the day
 								</NcActionButton>
 								<NcActionButton @click="remove(f)">
 									<template #icon>
@@ -453,10 +578,6 @@ async function remove(f: Flight) {
 </template>
 
 <style scoped>
-.view-flight {
-	padding: 16px;
-}
-
 .loader {
 	display: flex;
 	justify-content: center;
@@ -482,9 +603,18 @@ async function remove(f: Flight) {
 
 .filter-actions {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 12px;
 	margin-bottom: 12px;
+}
+
+/* Card breakpoint: keep in step with CARD_BREAKPOINT_PX. On a phone the
+   buttons share each line rather than leaving it ragged. */
+@media (width <= 700px) {
+	.filter-actions > * {
+		flex: 1 1 auto;
+	}
 }
 
 .flight-table {
@@ -539,8 +669,11 @@ async function remove(f: Flight) {
 	cursor: pointer;
 }
 
-.sort-button:hover {
-	background-color: var(--color-background-hover);
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.sort-button:hover {
+		background-color: var(--color-background-hover);
+	}
 }
 
 .sort-indicator {
@@ -597,5 +730,161 @@ async function remove(f: Flight) {
 .reorder-controls {
 	display: inline-flex;
 	flex-direction: column;
+}
+
+/* Medium widths (tablet, or a small laptop with the navigation open): drop the
+   least-scanned columns, Reg. (7), Cabin (8) and Seat (9), header and cells
+   together so each header stays over its column. An exclusive range, so the
+   card rules below never have to undo it. */
+@media (701px <= width <= 1100px) {
+	.flight-table th:nth-child(7),
+	.flight-table th:nth-child(8),
+	.flight-table th:nth-child(9),
+	.flight-table td:nth-child(7),
+	.flight-table td:nth-child(8),
+	.flight-table td:nth-child(9) {
+		display: none;
+	}
+}
+
+/* Cards. Keep 700px in step with CARD_BREAKPOINT_PX (useCardLayout.ts), which
+   decides what a tap on a card does.
+
+   Each row becomes a wrapping flex line of its cells, reordered into three
+   lines — route and date; flight · distance · cabin · seat; aircraft ·
+   registration — with the row's ::before and ::after as the two line breaks.
+   The checkbox and the row menu sit in the row's side padding. Unset values
+   leave their cell :empty, and it is hidden; the "·" separators go only on a
+   value that follows another set value of its line, so none is left stray. */
+@media (width <= 700px) {
+	.flight-table,
+	.flight-table tbody {
+		display: block;
+	}
+
+	.flight-table thead,
+	.flight-table td.reorder {
+		display: none;
+	}
+
+	.flight-table tr {
+		/* The row menu is a full touch target here. */
+		--fj-card-action: 44px;
+		position: relative;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		row-gap: 2px;
+		min-height: var(--fj-card-action);
+		padding-block: 10px;
+		padding-inline: 8px calc(var(--fj-card-action) + 4px);
+		border-bottom: 1px solid var(--color-border);
+		cursor: pointer;
+	}
+
+	/* Room for the checkbox only in select mode (D7); otherwise its cell is
+	   empty and hidden, overriding the (hover: none) always-show rule. */
+	.flight-table.select-mode tr {
+		padding-inline-start: calc(var(--default-clickable-area) + 4px);
+	}
+
+	.flight-table tr::before,
+	.flight-table tr::after {
+		content: '';
+		flex-basis: 100%;
+		height: 0;
+	}
+
+	.flight-table tr::before {
+		order: 3;
+	}
+
+	.flight-table tr::after {
+		order: 5;
+	}
+
+	.flight-table td,
+	.flight-table td.numeric {
+		display: block;
+		min-width: 0;
+		padding: 0;
+		border: none;
+	}
+
+	.flight-table td:empty {
+		display: none;
+	}
+
+	/* Line 1: the route wraps rather than truncating; it identifies the leg. */
+	.flight-table td.route {
+		order: 1;
+		overflow-wrap: anywhere;
+	}
+
+	.flight-table td.date {
+		order: 2;
+		margin-inline-start: 8px;
+		white-space: nowrap;
+		color: var(--color-text-maxcontrast);
+	}
+
+	/* Line 2. */
+	.flight-table td.detail {
+		order: 4;
+		white-space: nowrap;
+		color: var(--color-text-maxcontrast);
+	}
+
+	.flight-table td.distance:not(:empty)::after {
+		content: '\00a0km';
+	}
+
+	/* Line 3: the aircraft grows only to its own width, so the registration
+	   follows it directly, and truncates when the two don't fit. Its basis is
+	   1px, not 0: a zero-width item still fits beside the 100% line break,
+	   and would sit, squeezed to nothing, on the break's line instead of
+	   starting line 3 with the registration. */
+	.flight-table td.aircraft,
+	.flight-table td.registration {
+		order: 6;
+		white-space: nowrap;
+		color: var(--color-text-maxcontrast);
+	}
+
+	.flight-table td.aircraft {
+		flex: 1 1 1px;
+		max-width: max-content;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.flight-table td.registration {
+		flex-shrink: 0;
+	}
+
+	.flight-table td.detail:not(:empty) ~ td.detail:not(:empty)::before,
+	.flight-table td.aircraft:not(:empty) ~ td.registration:not(:empty)::before {
+		content: '·';
+		margin-inline: 6px;
+	}
+
+	/* Both centred on the first line; the taller menu target reaches into
+	   the second. */
+	.flight-table td.select,
+	.flight-table td.actions {
+		position: absolute;
+	}
+
+	.flight-table td.select {
+		top: 4px;
+		inset-inline-start: 0;
+		width: auto;
+	}
+
+	.flight-table td.actions {
+		--default-clickable-area: var(--fj-card-action);
+		top: 0;
+		inset-inline-end: 0;
+	}
 }
 </style>

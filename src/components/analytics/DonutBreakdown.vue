@@ -81,9 +81,15 @@ const largest = computed(() => [...props.segments].sort((a, b) => b.count - a.co
 	color: var(--color-main-text);
 }
 
-.breakdown__row:hover,
 .breakdown__row:focus-visible {
 	background: var(--color-background-hover);
+}
+
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.breakdown__row:hover {
+		background: var(--color-background-hover);
+	}
 }
 
 .breakdown__swatch {

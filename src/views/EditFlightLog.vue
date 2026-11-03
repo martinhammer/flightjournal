@@ -151,7 +151,7 @@ function cancel() {
 </script>
 
 <template>
-	<div class="edit-flight">
+	<div class="edit-flight fj-view">
 		<h2>Edit flight</h2>
 		<form v-if="loaded" @submit.prevent="save">
 			<div class="row">
@@ -201,7 +201,6 @@ function cancel() {
 
 <style scoped>
 .edit-flight {
-	padding: 16px;
 	max-width: 720px;
 }
 
@@ -229,6 +228,20 @@ function cancel() {
 
 .row.half > * {
 	grid-column: 1;
+}
+
+/* Phones: one field per line. A half-width field at 360px leaves under 150px,
+   too narrow for an airport name or the aircraft feedback line under its
+   input. */
+@media (width <= 600px) {
+	.row.two,
+	.row.half {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.row.half > * {
+		grid-column: 1 / -1;
+	}
 }
 
 textarea {

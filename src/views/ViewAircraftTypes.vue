@@ -151,7 +151,7 @@ function showFlights(t: AircraftType) {
 </script>
 
 <template>
-	<div class="view-aircraft-types">
+	<div class="view-aircraft-types fj-view">
 		<h2>Aircraft types</h2>
 		<div class="controls">
 			<div class="switch-row">
@@ -179,40 +179,68 @@ function showFlights(t: AircraftType) {
 			:name="emptyName"
 			:description="emptyDescription" />
 		<template v-else>
-			<table class="aircraft-table">
-				<thead>
-					<tr>
-						<th>ICAO</th>
+			<!-- Explicit roles: the card layout changes these elements' display,
+				 which can strip their table semantics in some browsers. -->
+			<table class="aircraft-table" role="table">
+				<thead role="rowgroup">
+					<tr role="row">
+						<th role="columnheader">
+							ICAO
+						</th>
 						<!-- No IATA column: `iata_code` exists in the schema but nothing
 						     writes it yet (the OpenFlights overlay is deferred), so it
 						     would render an empty cell on every row. Restore this and
 						     its <td> when the overlay lands. -->
-						<th>Manufacturer</th>
-						<th>Model</th>
-						<th>Class</th>
-						<th>Engines</th>
-						<th>Wake</th>
-						<th class="numeric">
+						<th role="columnheader">
+							Manufacturer
+						</th>
+						<th role="columnheader">
+							Model
+						</th>
+						<th role="columnheader">
+							Class
+						</th>
+						<th role="columnheader">
+							Engines
+						</th>
+						<th role="columnheader">
+							Wake
+						</th>
+						<th class="numeric" role="columnheader">
 							Flights
 						</th>
-						<th />
+						<th role="columnheader" aria-label="Actions" />
 					</tr>
 				</thead>
-				<tbody>
-					<tr v-for="t in items" :key="t.id">
-						<td>{{ t.icaoCode }}</td>
-						<td>{{ t.manufacturer ?? '' }}</td>
-						<td>
+				<tbody role="rowgroup">
+					<!-- An unset value must leave its cell :empty (the card layout
+						 hides it): render '' rather than a placeholder. -->
+					<tr v-for="t in items" :key="t.id" role="row">
+						<td class="designator" role="cell">
+							{{ t.icaoCode }}
+						</td>
+						<td class="manufacturer" role="cell">
+							{{ t.manufacturer ?? '' }}
+						</td>
+						<td class="model" role="cell">
 							{{ t.model ?? '' }}
 							<span v-if="t.canonical" class="default-badge" title="Several models can share one ICAO code, this is the default one for this code">default</span>
 						</td>
-						<td>{{ t.description ?? '' }}</td>
-						<td>{{ engines(t) }}</td>
-						<td>{{ t.wtc ?? '' }}</td>
-						<td class="numeric">
+						<td class="detail" role="cell">
+							{{ t.description ?? '' }}
+						</td>
+						<td class="detail" role="cell">
+							{{ engines(t) }}
+						</td>
+						<td class="detail wake" role="cell">
+							{{ t.wtc ?? '' }}
+						</td>
+						<!-- data-unit: the card layout writes "N flights" from CSS,
+							 leaving the cell's own text the bare count. -->
+						<td class="numeric count detail" role="cell" :data-unit="flightCount(t) === 1 ? 'flight' : 'flights'">
 							{{ flightCount(t) }}
 						</td>
-						<td class="row-actions">
+						<td class="row-actions" role="cell">
 							<NcActions v-if="typeName(t)" :force-menu="true">
 								<NcActionButton @click="showFlights(t)">
 									<template #icon>
@@ -225,7 +253,7 @@ function showFlights(t: AircraftType) {
 					</tr>
 				</tbody>
 			</table>
-			<div class="pager">
+			<div class="fj-pager">
 				<span class="pager-info">
 					{{ pageStart }}–{{ pageEnd }} of {{ total }}
 				</span>
@@ -241,10 +269,6 @@ function showFlights(t: AircraftType) {
 </template>
 
 <style scoped>
-.view-aircraft-types {
-	padding: 16px;
-}
-
 .switch-row {
 	display: flex;
 	flex-wrap: wrap;
@@ -302,8 +326,11 @@ function showFlights(t: AircraftType) {
 	color: var(--color-primary-element-light-text);
 }
 
-.pager {
+/* Not ".pager": Nextcloud core styles that class (float: right and a 13em
+   end margin, for an old core widget), which squeezed this row. */
+.fj-pager {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
 	align-items: center;
 	gap: 12px;
@@ -321,5 +348,102 @@ function showFlights(t: AircraftType) {
 .row-actions {
 	width: 44px;
 	padding: 0;
+}
+
+/* Medium widths: drop Engines (5) and Wake (6), header and cells together. An
+   exclusive range, so the card rules never undo it. */
+@media (701px <= width <= 1100px) {
+	.aircraft-table th:nth-child(5),
+	.aircraft-table th:nth-child(6),
+	.aircraft-table td:nth-child(5),
+	.aircraft-table td:nth-child(6) {
+		display: none;
+	}
+}
+
+/* Cards. Keep 700px in step with CARD_BREAKPOINT_PX (useCardLayout.ts).
+
+   Each row becomes a wrapping flex line of its cells in two lines —
+   designator, manufacturer and model (with its badge); class · engines ·
+   wake · N flights — with the row's ::before as the line break and the row
+   menu in its end padding. Unset values leave their cell :empty, and it is
+   hidden; the "·" separators go only between set values. */
+@media (width <= 700px) {
+	.aircraft-table,
+	.aircraft-table tbody {
+		display: block;
+	}
+
+	.aircraft-table thead {
+		display: none;
+	}
+
+	.aircraft-table tr {
+		position: relative;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		row-gap: 2px;
+		min-height: 44px;
+		padding-block: 10px;
+		padding-inline: 0 48px;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.aircraft-table tr::before {
+		content: '';
+		order: 2;
+		flex-basis: 100%;
+		height: 0;
+	}
+
+	.aircraft-table td {
+		display: block;
+		min-width: 0;
+		padding: 0;
+		border: none;
+	}
+
+	.aircraft-table td:empty {
+		display: none;
+	}
+
+	/* Line 1 wraps rather than truncating: it identifies the type. */
+	.aircraft-table td.designator,
+	.aircraft-table td.manufacturer,
+	.aircraft-table td.model {
+		order: 1;
+		margin-inline-end: 8px;
+		overflow-wrap: anywhere;
+	}
+
+	/* Line 2. */
+	.aircraft-table td.detail {
+		order: 3;
+		white-space: nowrap;
+		color: var(--color-text-maxcontrast);
+	}
+
+	.aircraft-table td.detail:not(:empty) ~ td.detail:not(:empty)::before {
+		content: '·';
+		margin-inline: 6px;
+	}
+
+	/* A lone "M" says nothing without its column header. */
+	.aircraft-table td.wake:not(:empty)::after {
+		content: '\00a0wake';
+	}
+
+	.aircraft-table td.count::after {
+		content: '\00a0' attr(data-unit);
+	}
+
+	.aircraft-table td.row-actions {
+		position: absolute;
+		top: 0;
+		inset-inline-end: 0;
+		width: auto;
+		--default-clickable-area: 44px;
+	}
 }
 </style>

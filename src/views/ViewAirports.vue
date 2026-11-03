@@ -161,7 +161,7 @@ function showOnMap(a: Airport) {
 </script>
 
 <template>
-	<div class="view-airports">
+	<div class="view-airports fj-view">
 		<h2>Airports</h2>
 		<div class="controls">
 			<div class="switch-row">
@@ -189,37 +189,75 @@ function showOnMap(a: Airport) {
 			:name="emptyName"
 			:description="emptyDescription" />
 		<template v-else>
-			<table class="airport-table">
-				<thead>
-					<tr>
-						<th>ICAO</th>
-						<th>IATA</th>
-						<th>Name</th>
-						<th>City</th>
-						<th>Country</th>
-						<th>Coordinates</th>
-						<th>Elevation</th>
-						<th>Timezone</th>
-						<th class="numeric">
+			<!-- Explicit roles: the card layout changes these elements' display,
+				 which can strip their table semantics in some browsers. -->
+			<table class="airport-table" role="table">
+				<thead role="rowgroup">
+					<tr role="row">
+						<th role="columnheader">
+							ICAO
+						</th>
+						<th role="columnheader">
+							IATA
+						</th>
+						<th role="columnheader">
+							Name
+						</th>
+						<th role="columnheader">
+							City
+						</th>
+						<th role="columnheader">
+							Country
+						</th>
+						<th role="columnheader">
+							Coordinates
+						</th>
+						<th role="columnheader">
+							Elevation
+						</th>
+						<th role="columnheader">
+							Timezone
+						</th>
+						<th class="numeric" role="columnheader">
 							Flights
 						</th>
-						<th />
+						<th role="columnheader" aria-label="Actions" />
 					</tr>
 				</thead>
-				<tbody>
-					<tr v-for="a in items" :key="a.id">
-						<td>{{ a.icao ?? '' }}</td>
-						<td>{{ a.iata ?? '' }}</td>
-						<td>{{ a.name ?? '' }}</td>
-						<td>{{ [a.city, a.state].filter(Boolean).join(', ') }}</td>
-						<td>{{ a.countryIso2 ?? '' }}</td>
-						<td>{{ coord(a) }}</td>
-						<td>{{ a.elevation ?? '' }}</td>
-						<td>{{ a.tz ?? '' }}</td>
-						<td class="numeric">
+				<tbody role="rowgroup">
+					<!-- An unset value must leave its cell :empty (the card layout
+						 hides it): render '' rather than a placeholder. -->
+					<tr v-for="a in items" :key="a.id" role="row">
+						<td class="icao" role="cell">
+							{{ a.icao ?? '' }}
+						</td>
+						<td class="iata" role="cell">
+							{{ a.iata ?? '' }}
+						</td>
+						<td class="name" role="cell">
+							{{ a.name ?? '' }}
+						</td>
+						<td class="city" role="cell">
+							{{ [a.city, a.state].filter(Boolean).join(', ') }}
+						</td>
+						<td class="country" role="cell">
+							{{ a.countryIso2 ?? '' }}
+						</td>
+						<td role="cell">
+							{{ coord(a) }}
+						</td>
+						<td role="cell">
+							{{ a.elevation ?? '' }}
+						</td>
+						<td role="cell">
+							{{ a.tz ?? '' }}
+						</td>
+						<!-- data-unit: the card layout writes "N flights" from CSS,
+							 leaving the cell's own text the bare count. -->
+						<td class="numeric count" role="cell" :data-unit="flightCount(a) === 1 ? 'flight' : 'flights'">
 							{{ flightCount(a) }}
 						</td>
-						<td class="row-actions">
+						<td class="row-actions" role="cell">
 							<NcActions v-if="canonicalCode(a)" :force-menu="true">
 								<NcActionButton @click="showFlights(a, 'to')">
 									<template #icon>
@@ -250,7 +288,7 @@ function showOnMap(a: Airport) {
 					</tr>
 				</tbody>
 			</table>
-			<div class="pager">
+			<div class="fj-pager">
 				<span class="pager-info">
 					{{ pageStart }}–{{ pageEnd }} of {{ total }}
 				</span>
@@ -266,10 +304,6 @@ function showOnMap(a: Airport) {
 </template>
 
 <style scoped>
-.view-airports {
-	padding: 16px;
-}
-
 .switch-row {
 	display: flex;
 	flex-wrap: wrap;
@@ -316,8 +350,11 @@ function showOnMap(a: Airport) {
 	color: var(--color-text-maxcontrast);
 }
 
-.pager {
+/* Not ".pager": Nextcloud core styles that class (float: right and a 13em
+   end margin, for an old core widget), which squeezed this row. */
+.fj-pager {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
 	align-items: center;
 	gap: 12px;
@@ -335,5 +372,143 @@ function showOnMap(a: Airport) {
 .row-actions {
 	width: 44px;
 	padding: 0;
+}
+
+/* Medium widths: drop Coordinates (6), Elevation (7) and Timezone (8), header
+   and cells together. An exclusive range, so the card rules never undo it. */
+@media (701px <= width <= 1100px) {
+	.airport-table th:nth-child(6),
+	.airport-table th:nth-child(7),
+	.airport-table th:nth-child(8),
+	.airport-table td:nth-child(6),
+	.airport-table td:nth-child(7),
+	.airport-table td:nth-child(8) {
+		display: none;
+	}
+}
+
+/* Cards. Keep 700px in step with CARD_BREAKPOINT_PX (useCardLayout.ts).
+
+   Each row becomes a wrapping flex line of its cells, reordered into two
+   lines — "IATA · ICAO" then the name; city, country · N flights — with the
+   row's ::before as the line break and the row menu in its end padding. Unset
+   values leave their cell :empty, and it is hidden; separators go only
+   between set values. Coordinates, elevation and timezone are left out. */
+@media (width <= 700px) {
+	.airport-table,
+	.airport-table tbody {
+		display: block;
+	}
+
+	.airport-table thead,
+	.airport-table td:nth-child(6),
+	.airport-table td:nth-child(7),
+	.airport-table td:nth-child(8) {
+		display: none;
+	}
+
+	.airport-table tr {
+		position: relative;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		row-gap: 2px;
+		min-height: 44px;
+		padding-block: 10px;
+		padding-inline: 0 48px;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.airport-table tr::before {
+		content: '';
+		order: 4;
+		flex-basis: 100%;
+		height: 0;
+	}
+
+	.airport-table td {
+		display: block;
+		min-width: 0;
+		padding: 0;
+		border: none;
+	}
+
+	.airport-table td:empty {
+		display: none;
+	}
+
+	/* Line 1 wraps rather than truncating: it identifies the airport. IATA
+	   leads, as it is the code flights store when there is one. */
+	/* The gap before the name is the codes' end margin, not the name's start
+	   margin, so a name that wraps onto its own line starts flush. */
+	.airport-table td.iata {
+		order: 1;
+		margin-inline-end: 8px;
+	}
+
+	.airport-table td.icao {
+		order: 2;
+		margin-inline-end: 8px;
+	}
+
+	.airport-table td.icao:not(:empty) + td.iata:not(:empty) {
+		margin-inline-end: 0;
+	}
+
+	.airport-table td.icao:not(:empty) + td.iata:not(:empty)::after {
+		content: '·';
+		margin-inline: 6px;
+	}
+
+	.airport-table td.name {
+		order: 3;
+		overflow-wrap: anywhere;
+	}
+
+	/* Line 2. */
+	.airport-table td.city,
+	.airport-table td.country,
+	.airport-table td.count {
+		color: var(--color-text-maxcontrast);
+	}
+
+	.airport-table td.city {
+		order: 5;
+		overflow-wrap: anywhere;
+	}
+
+	.airport-table td.country {
+		order: 6;
+	}
+
+	/* The comma ends the city, so a country that wraps doesn't start its
+	   line with one. */
+	.airport-table td.city:not(:empty):has(+ td.country:not(:empty))::after {
+		content: ',';
+		margin-inline-end: 0.3em;
+	}
+
+	.airport-table td.count {
+		order: 7;
+		white-space: nowrap;
+	}
+
+	.airport-table td.count::after {
+		content: '\00a0' attr(data-unit);
+	}
+
+	.airport-table td.city:not(:empty) ~ td.count::before,
+	.airport-table td.country:not(:empty) ~ td.count::before {
+		content: '·';
+		margin-inline: 6px;
+	}
+
+	.airport-table td.row-actions {
+		position: absolute;
+		top: 0;
+		inset-inline-end: 0;
+		width: auto;
+		--default-clickable-area: 44px;
+	}
 }
 </style>

@@ -200,18 +200,33 @@ function tooltipContent(title: string, lines: string[]): HTMLElement {
 	return el
 }
 
+// The popup's heading: the same title and lines as the element's hover
+// tooltip, which a touch screen never shows, so the click popup has to carry
+// that information too.
+function popupHeader(el: HTMLElement, title: string, lines: string[]) {
+	const header = document.createElement('div')
+	header.className = 'fj-map-popup__header'
+	const t = document.createElement('div')
+	t.className = 'fj-map-popup__title'
+	t.textContent = title
+	header.appendChild(t)
+	for (const line of lines) {
+		const c = document.createElement('div')
+		c.className = 'fj-map-popup__info'
+		c.textContent = line
+		header.appendChild(c)
+	}
+	el.appendChild(header)
+}
+
 // A marker popup offering From / To / Both — applies the airport filter on the
 // Map view itself. Built as plain DOM — Leaflet popups live outside Vue's
 // render tree.
-function airportPopup(a: Airport): HTMLElement {
+function airportPopup(a: Airport, lines: string[]): HTMLElement {
 	const code = codeOf(a)
 	const el = document.createElement('div')
 	el.className = 'fj-map-popup'
-
-	const title = document.createElement('div')
-	title.className = 'fj-map-popup__title'
-	title.textContent = a.name ? `${code} - ${a.name}` : code
-	el.appendChild(title)
+	popupHeader(el, a.name ? `${code} - ${a.name}` : code, lines)
 
 	const actions: [string, AirportDirection][] = [
 		['Flights from', 'from'],
@@ -249,18 +264,14 @@ function airportPopup(a: Airport): HTMLElement {
 // both directional options plus the bidirectional one when the route was flown
 // both ways, or just the single directional option when it was only flown one
 // way. Directional options are ordered oldest-flown-first.
-function routePopup(from: Airport, to: Airport): HTMLElement {
+function routePopup(from: Airport, to: Airport, lines: string[]): HTMLElement {
 	const a = codeOf(from)
 	const b = codeOf(to)
 	const [pairA, pairB] = [a, b].sort()
 
 	const el = document.createElement('div')
 	el.className = 'fj-map-popup'
-
-	const title = document.createElement('div')
-	title.className = 'fj-map-popup__title'
-	title.textContent = `${pairA} ↔ ${pairB}`
-	el.appendChild(title)
+	popupHeader(el, `${pairA} ↔ ${pairB}`, lines)
 
 	const directions = flownRouteDirections(a, b, store.flights)
 	const actions: [string, LocationQuery][] = directions.map(
@@ -288,6 +299,22 @@ function routePopup(from: Airport, to: Airport): HTMLElement {
 	return el
 }
 
+// Hover tooltips only where there is a hover. Leaflet also opens a bound
+// tooltip on tap, where it just repeats — and sits beside — the popup, which
+// carries the same lines (popupHeader). Read per draw, so a hybrid device that
+// gains or loses a mouse is right from the next redraw.
+function canHover(): boolean {
+	return window.matchMedia?.('(hover: hover)').matches ?? true
+}
+
+// Leaflet keeps its controls above its popups, and by default auto-pans a
+// popup only 5px clear of the edge, so one opened near the top left lands
+// under the zoom buttons. Keep popups clear of the control's corner instead
+// (its 10px margin plus a button's width, and a little air).
+const POPUP_OPTIONS: L.PopupOptions = {
+	autoPanPaddingTopLeft: L.point(60, 10),
+}
+
 // Draw (or redraw) the flight overlay for the currently active filter. The
 // basemap is added once by initMap; only this layer group changes.
 function drawOverlay() {
@@ -304,6 +331,7 @@ function drawOverlay() {
 	const totalRouteCounts = countFlightsByRoute(store.flights)
 	const filteredRouteCounts = countFlightsByRoute(flights)
 	const filterActive = activeFilters.value.length > 0
+	const tooltips = canHover()
 	for (const leg of buildLegs(flights, byCode)) {
 		const a = codeOf(leg.from)
 		const b = codeOf(leg.to)
@@ -321,14 +349,12 @@ function drawOverlay() {
 			leg.from.lat as number, leg.from.lon as number,
 			leg.to.lat as number, leg.to.lon as number,
 		)
-		line.bindTooltip(
-			tooltipContent(key.replace('|', ' ↔ '), [
-				formatCount(shownCount, total, filterActive),
-				`${distance.toLocaleString()} km`,
-			]),
-			{ sticky: true },
-		)
-		line.bindPopup(routePopup(leg.from, leg.to))
+		const lines = [
+			formatCount(shownCount, total, filterActive),
+			`${distance.toLocaleString()} km`,
+		]
+		if (tooltips) line.bindTooltip(tooltipContent(key.replace('|', ' ↔ '), lines), { sticky: true })
+		line.bindPopup(routePopup(leg.from, leg.to, lines), POPUP_OPTIONS)
 		line.addTo(overlay)
 	}
 
@@ -360,8 +386,8 @@ function drawOverlay() {
 				`Total: ${plural(total)}`,
 			]
 			: [plural(total)]
-		marker.bindTooltip(tooltipContent(base, lines))
-		marker.bindPopup(airportPopup(a))
+		if (tooltips) marker.bindTooltip(tooltipContent(base, lines))
+		marker.bindPopup(airportPopup(a, lines), POPUP_OPTIONS)
 		// Double-click is a shortcut for the popup's "Flights to and from" action:
 		// focus the airport and apply the bidirectional filter in one gesture.
 		marker.on('dblclick', (e) => {
@@ -415,6 +441,13 @@ function initMap() {
 		zoom: cfg.zoom,
 		minZoom: cfg.minZoom,
 		maxZoom: 9,
+		// Let fitBounds (and pinch, wheel and trackpad zoom) settle between
+		// whole levels. Whole levels double the scale, so snapping to them
+		// could leave a fit at half the size the screen allows — most visible
+		// on a phone. The vector basemap stays sharp at any zoom; the +/-
+		// buttons still step by whole levels (zoomDelta), and the
+		// projection-specific fits pick whole levels themselves.
+		zoomSnap: 0.25,
 		worldCopyJump: cfg.worldCopyJump,
 		attributionControl: false,
 		// Canvas renderer with tolerance adds an N-pixel pad to every path's
@@ -441,6 +474,14 @@ function initMap() {
 	map.invalidateSize()
 }
 
+// The canvas changes size without the window resizing — Chrome's URL bar
+// showing or hiding, a phone rotating, the navigation opening — and Leaflet
+// only notices window resizes by itself. One observer for the view's lifetime:
+// the canvas element survives every map rebuild (it is v-show, not v-if).
+const resizeObserver = typeof ResizeObserver === 'undefined'
+	? null
+	: new ResizeObserver(() => map?.invalidateSize())
+
 onMounted(async () => {
 	try {
 		if (!store.loaded) await store.fetchAll()
@@ -456,6 +497,7 @@ onMounted(async () => {
 		await nextTick()
 		initMap()
 	}
+	if (mapEl.value) resizeObserver?.observe(mapEl.value)
 })
 
 // React to filter changes (e.g. clearing the chip) without a full remount.
@@ -489,6 +531,7 @@ watch(() => mapSettings.projection, async () => {
 })
 
 onBeforeUnmount(() => {
+	resizeObserver?.disconnect()
 	map?.remove()
 	map = null
 	overlay = null
@@ -497,7 +540,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<div class="map-view">
-		<div class="header">
+		<div class="header fj-view">
 			<h2>Map</h2>
 			<div class="filter-bar">
 				<NcChip
@@ -543,11 +586,16 @@ onBeforeUnmount(() => {
 .map-view {
 	display: flex;
 	flex-direction: column;
-	height: calc(100vh - var(--header-height, 50px));
+	/* The content card's own height (NcAppContent and its wrapper are both
+	   100%), not the viewport's: 100vh on Chrome for Android is the height with
+	   the URL bar hidden, and ignores Nextcloud's card margins on desktop. */
+	height: 100%;
 }
 
+/* .fj-view supplies the padding; the map below starts right under the
+   header. */
 .header {
-	padding: 16px 16px 0;
+	padding-bottom: 0;
 }
 
 /* Same height and margins on Flights, Map and Analytics, whatever the row
@@ -569,9 +617,18 @@ onBeforeUnmount(() => {
 
 .filter-actions {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 12px;
 	margin-bottom: 12px;
+}
+
+/* Card breakpoint: keep in step with CARD_BREAKPOINT_PX. On a phone the
+   buttons share each line rather than leaving it ragged. */
+@media (width <= 700px) {
+	.filter-actions > * {
+		flex: 1 1 auto;
+	}
 }
 
 .map-area {
@@ -596,14 +653,23 @@ onBeforeUnmount(() => {
 
 <!-- Non-scoped: Leaflet popups are appended outside the component's render tree. -->
 <style>
+.fj-map-popup__header {
+	margin-bottom: 6px;
+}
+
 .fj-map-popup__title {
 	font-weight: bold;
-	margin-bottom: 6px;
+}
+
+.fj-map-popup__info {
+	color: var(--color-text-maxcontrast);
+	margin-top: 2px;
 }
 
 .fj-map-popup__action {
 	display: block;
 	width: 100%;
+	min-height: var(--default-clickable-area);
 	text-align: start;
 	padding: 6px 8px;
 	border: none;
@@ -614,8 +680,11 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 }
 
-.fj-map-popup__action:hover {
-	background: var(--color-background-hover);
+/* Hover only where there is one: a tap leaves :hover stuck on touch screens. */
+@media (hover: hover) {
+	.fj-map-popup__action:hover {
+		background: var(--color-background-hover);
+	}
 }
 
 .fj-map-tooltip__title {
