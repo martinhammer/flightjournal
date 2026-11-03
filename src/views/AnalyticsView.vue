@@ -819,7 +819,9 @@ h4 {
 
 .tiles {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	/* 140px, not wider: two tiles and the gap must fit the 328px a 360px
+	   phone leaves, or every tile stacks one per row. */
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 	gap: 16px;
 }
 
@@ -842,6 +844,14 @@ h4 {
 
 .tile__label {
 	font-size: 13px;
+}
+
+/* At two tiles per row on a small phone a tile holds about 116px of text,
+   less than a seven-digit distance needs at 28px. */
+@media (width <= 400px) {
+	.tile__value {
+		font-size: 22px;
+	}
 }
 
 .tile__delta {
