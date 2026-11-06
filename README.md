@@ -1,25 +1,27 @@
 # Flight Journal
 
-A personal Nextcloud app project for tracking flights that I have traveled on.
+A personal Nextcloud app project for tracking flights that I have travelled on.
 
-The app is a flight log for the frequent traveler, keeping track of flights with details such as origin, destination, airline, flight number, aircraft type etc. This data can be visualized on a map and various statistics and insights can be generated.
+The app is a flight log for the frequent traveller, keeping track of flights with details such as origin, destination, airline, flight number, aircraft type etc. This data can be visualized on a map and various statistics and insights can be generated.
 
 Key features:
 * Flights screen to add, view, and manage your flight log entries
 * The Flights screen supports filters, sorting and bulk edit
 * Admin Settings screen which allows import of airport and aircraft reference data sets
 * Personal Settings screen with bulk import/export, bulk delete and reconciliation (enrichment) against reference data sets
-* Map view showing your flights on a map (depends on airport reference data with geo coordinates) - different projections are supported
+* Map view showing your flights on a map (depends on airport reference data with geo coordinates) - different map projections are supported
 * Great circle distance is calculated (depends on airport reference data with geo coordinates)
 * Analytics screen with cool charts, visualizations and statistics
 * Applied filters propagate between the Flights, Map, Analytics screens
 * Airports and Aircraft types screens
 * Demo data set which can be used for experimentation
+* Care has been taken that all screens work well on mobile phone browser, so that the app is usable on the go
 
 Future roadmap:
+* Further reference data enrichment
 * Polishing the rough edges
 * Localization
-* Further reference data enrichment
+* Photos?
 * Mobile client?
 
 **The app is currently NOT published on Nextcloud app store. This might change once it reaches a certain level of feature-completeness AND if there is any interest or value in publishing it.**
@@ -32,7 +34,7 @@ Credit to the canonical reference data sets supported by the application:
 
 This is a personal hobby project. I have been keeping a log of all my flights for around 10 years and I have an interest in software development, data analysis and visualization. I am using this project to learn about Nextcloud app development and AI-assisted development. Significant portion of the code has been written by Claude Code.
 
-### Find this useful? Have a suggestion? Found a bug?
+### Find this useful? Have a suggestion? Want to get involved?
 
 Feel free to get in touch and/or submit an issue.
 
