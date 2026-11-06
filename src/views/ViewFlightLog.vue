@@ -14,8 +14,10 @@ import Close from 'vue-material-design-icons/Close.vue'
 import MenuDown from 'vue-material-design-icons/MenuDown.vue'
 import MenuUp from 'vue-material-design-icons/MenuUp.vue'
 import Pencil from 'vue-material-design-icons/Pencil.vue'
+import Plus from 'vue-material-design-icons/Plus.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import { showConfirmation, showError } from '@nextcloud/dialogs'
+import { addFlightOpen } from '../addFlight.ts'
 import { useFlightsStore } from '../store/flights.ts'
 import BulkEditDialog from '../components/BulkEditDialog.vue'
 import FilterPicker from '../components/FilterPicker.vue'
@@ -319,6 +321,19 @@ async function remove(f: Flight) {
 <template>
 	<div class="view-flight fj-view">
 		<h2>Flight log</h2>
+		<!-- On a phone the navigation's own entry is behind the toggle. Positioned
+			 onto the heading's line, not wrapped with it: .fj-view seats the h2 as
+			 the view's first child, and the desktop layout stays as it is. -->
+		<NcButton
+			v-if="cardLayout"
+			variant="primary"
+			class="add-flight"
+			@click="addFlightOpen = true">
+			<template #icon>
+				<Plus :size="20" />
+			</template>
+			Add flight
+		</NcButton>
 		<!-- A successful apply clears the selection: under a filter such as
 			 "Unmatched aircraft" the fixed rows drop out of view, and a selection
 			 that is partly invisible is exactly what clearing on filter change
@@ -578,6 +593,19 @@ async function remove(f: Flight) {
 </template>
 
 <style scoped>
+.view-flight {
+	position: relative;
+}
+
+/* At the end of the heading's line: the top and the end inset of .fj-view's
+   padding, level with the navigation toggle. The parent selector outranks
+   NcButton's own position: relative, whose CSS loads later. */
+.view-flight .add-flight {
+	position: absolute;
+	top: var(--fj-toggle-gap);
+	inset-inline-end: 16px;
+}
+
 .loader {
 	display: flex;
 	justify-content: center;

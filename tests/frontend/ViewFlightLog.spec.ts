@@ -29,6 +29,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 	useRouter: () => ({ push }),
 }))
 
+import { addFlightOpen } from '../../src/addFlight.ts'
 import ViewFlightLog from '../../src/views/ViewFlightLog.vue'
 
 function flight(id: number, originCode: string, destinationCode: string, distanceKm: number | null = null) {
@@ -118,6 +119,7 @@ beforeEach(() => {
 	push.mockClear()
 	store.move.mockClear()
 	routeHolder.query = {}
+	addFlightOpen.value = false
 	// f1 LHR→JFK, f2 JFK→LHR, f3 CPH→LHR
 	store.flights = [
 		flight(1, 'LHR', 'JFK', 5555),
@@ -127,6 +129,10 @@ beforeEach(() => {
 })
 
 describe('ViewFlightLog filtering', () => {
+	it('has no Add flight button in the table layout', () => {
+		expect(render().find('.add-flight').exists()).toBe(false)
+	})
+
 	it('lists every flight when no filter is active', () => {
 		const wrapper = render()
 		expect(wrapper.findAll('tbody tr')).toHaveLength(3)
@@ -519,6 +525,14 @@ describe('ViewFlightLog card layout', () => {
 	afterEach(() => {
 		// @ts-expect-error jsdom has no matchMedia; put that back.
 		delete window.matchMedia
+	})
+
+	it('opens the shared Add flight dialog from the heading line', async () => {
+		const wrapper = render()
+		expect(addFlightOpen.value).toBe(false)
+
+		await wrapper.find('.add-flight').trigger('click')
+		expect(addFlightOpen.value).toBe(true)
 	})
 
 	it('opens the editor on a tap, carrying the active filter', async () => {

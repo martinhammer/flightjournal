@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { showError } from '@nextcloud/dialogs'
 
@@ -62,5 +62,40 @@ describe('AddFlightDialog save failure', () => {
 		await flushPromises()
 
 		expect(showError).toHaveBeenCalledWith('Failed to save flight')
+	})
+})
+
+describe('AddFlightDialog default date', () => {
+	const originalTz = process.env.TZ
+
+	afterEach(() => {
+		vi.useRealTimers()
+		if (originalTz === undefined) delete process.env.TZ
+		else process.env.TZ = originalTz
+	})
+
+	async function savedDateAt(tz: string, offsetMinutes: number, instant: string) {
+		process.env.TZ = tz
+		vi.useFakeTimers({ toFake: ['Date'] })
+		vi.setSystemTime(new Date(instant))
+		// Guards against a runner where assigning TZ has no effect: the test would
+		// then pass on the UTC date, proving nothing.
+		expect(new Date().getTimezoneOffset()).toBe(offsetMinutes)
+
+		store.create.mockResolvedValueOnce({})
+		const wrapper = await mountFilled()
+		await wrapper.find('.nc-button').trigger('click')
+		await flushPromises()
+		return store.create.mock.calls[0][0].flightDate
+	}
+
+	it('is the local date just after midnight east of UTC, where UTC is still yesterday', async () => {
+		// 00:30 on 10 March in Tokyo.
+		expect(await savedDateAt('Asia/Tokyo', -540, '2026-03-09T15:30:00Z')).toBe('2026-03-10')
+	})
+
+	it('is the local date in the evening west of UTC, where UTC is already tomorrow', async () => {
+		// 20:30 on 9 March in New York.
+		expect(await savedDateAt('America/New_York', 240, '2026-03-10T00:30:00Z')).toBe('2026-03-09')
 	})
 })

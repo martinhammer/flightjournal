@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import NcAppContent from '@nextcloud/vue/components/NcAppContent'
 import NcAppNavigation from '@nextcloud/vue/components/NcAppNavigation'
 import NcAppNavigationItem from '@nextcloud/vue/components/NcAppNavigationItem'
@@ -8,6 +7,7 @@ import NcAppNavigationSettings from '@nextcloud/vue/components/NcAppNavigationSe
 import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import NcContent from '@nextcloud/vue/components/NcContent'
 import Plus from 'vue-material-design-icons/Plus.vue'
+import { addFlightOpen } from './addFlight.ts'
 import AddFlightDialog from './views/AddFlightDialog.vue'
 import { PROJECTIONS, useMapSettingsStore } from './store/mapSettings.ts'
 
@@ -19,7 +19,6 @@ const items = [
 	{ to: '/aircraft-types', label: 'Aircraft types' },
 ]
 
-const addOpen = ref(false)
 const mapSettings = useMapSettingsStore()
 </script>
 
@@ -27,7 +26,7 @@ const mapSettings = useMapSettingsStore()
 	<NcContent app-name="flightjournal">
 		<NcAppNavigation>
 			<template #list>
-				<NcAppNavigationNew text="Add flight" @click="addOpen = true">
+				<NcAppNavigationNew text="Add flight" @click="addFlightOpen = true">
 					<template #icon>
 						<Plus :size="20" />
 					</template>
@@ -61,7 +60,7 @@ const mapSettings = useMapSettingsStore()
 		<NcAppContent>
 			<RouterView />
 		</NcAppContent>
-		<AddFlightDialog :open="addOpen" @update:open="addOpen = $event" />
+		<AddFlightDialog :open="addFlightOpen" @update:open="addFlightOpen = $event" />
 	</NcContent>
 </template>
 

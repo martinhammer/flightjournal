@@ -17,8 +17,16 @@ const emit = defineEmits<{(e: 'update:open', value: boolean): void}>()
 const store = useFlightsStore()
 const saving = ref(false)
 
+// The device's calendar date; toISOString() would give the UTC one.
+function localDate(d: Date): string {
+	const yyyy = d.getFullYear()
+	const mm = String(d.getMonth() + 1).padStart(2, '0')
+	const dd = String(d.getDate()).padStart(2, '0')
+	return `${yyyy}-${mm}-${dd}`
+}
+
 const blank = (): FlightInput => ({
-	flightDate: new Date().toISOString().slice(0, 10),
+	flightDate: localDate(new Date()),
 	originCode: null,
 	destinationCode: null,
 	originLabel: null,
@@ -53,10 +61,7 @@ watch(() => props.open, (isOpen) => {
 const dateModel = computed<Date>({
 	get: () => form.flightDate ? new Date(form.flightDate + 'T00:00:00') : new Date(),
 	set: (d: Date) => {
-		const yyyy = d.getFullYear()
-		const mm = String(d.getMonth() + 1).padStart(2, '0')
-		const dd = String(d.getDate()).padStart(2, '0')
-		form.flightDate = `${yyyy}-${mm}-${dd}`
+		form.flightDate = localDate(d)
 	},
 })
 
