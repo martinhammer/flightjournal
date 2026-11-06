@@ -9,6 +9,7 @@ import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwit
 import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNative'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import Plus from 'vue-material-design-icons/Plus.vue'
+import { yearOfRange, yearRange } from '../analytics.ts'
 import { listAircraftTypes, listAirports } from '../api.ts'
 import { BLANK_FILTER } from '../filters.ts'
 import { CABIN_CLASSES, aircraftDisplay, type Flight } from '../types.ts'
@@ -82,6 +83,8 @@ const multidayActive = computed(() => route.query.multiday === '1')
 const showUnmatchedAirports = computed(() => hasAirportData.value && !unmatchedAirportsActive.value)
 const showUnmatchedAircraft = computed(() => hasAircraftData.value && !unmatchedAircraftActive.value)
 const showMultiday = computed(() => hasMultiFlightDays.value && !multidayActive.value)
+// Likewise a one-click filter, so hidden while it would change nothing.
+const showCurrentYear = computed(() => yearOfRange(route.query.dateFrom, route.query.dateTo) !== new Date().getFullYear())
 
 // Distinct airline / aircraft codes derived from the user's own flights —
 // option lists until reference data lands.
@@ -219,6 +222,11 @@ function applyAircraft() {
 	editorOpen.value = false
 }
 
+// The device's calendar year. Replaces any date range already applied.
+function applyCurrentYear() {
+	commit(yearRange(new Date().getFullYear()))
+}
+
 // The two toggle filters commit straight from the menu — no editor to dismiss.
 function applyUnmatchedAirports() {
 	commit({ unmatchedAirports: '1' })
@@ -275,8 +283,11 @@ const editorTitle = computed(() => {
 			<template #icon>
 				<Plus :size="20" />
 			</template>
+			<NcActionButton v-if="showCurrentYear" :close-after-click="true" @click="applyCurrentYear">
+				Date: current year
+			</NcActionButton>
 			<NcActionButton :close-after-click="true" @click="openEditor('date')">
-				Date range
+				Date: custom range
 			</NcActionButton>
 			<NcActionButton :close-after-click="true" @click="openEditor('cabin')">
 				Cabin class

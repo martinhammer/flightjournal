@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 
@@ -160,13 +160,13 @@ async function menuItems(wrapper: ReturnType<typeof render>): Promise<string[]> 
 	return wrapper.findAll('.action-btn').map((b) => b.text())
 }
 
-// Picker order in the NcActions menu: Date range (0), Cabin class (1),
-// Airline (2), Aircraft type (3).
+// Picker order in the NcActions menu: Date: current year (0), Date: custom
+// range (1), Cabin class (2), Airline (3), Aircraft type (4).
 
 describe('FilterPicker — cabin', () => {
 	it('applies a cabin filter as a CSV query key', async () => {
 		const wrapper = render()
-		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
 		// Index 0 is the pinned "(blank)" option; CABIN_CLASSES follow (economy,
 		// premium_economy, business, …), so Business is index 3.
@@ -178,7 +178,7 @@ describe('FilterPicker — cabin', () => {
 
 	it('applies the blank cabin sentinel', async () => {
 		const wrapper = render()
-		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
 		// "(blank)" is the pinned first checkbox, above the cabin classes.
 		const checkboxes = wrapper.findAll('.cabin-checkbox input')
@@ -190,7 +190,7 @@ describe('FilterPicker — cabin', () => {
 	it('drops the cabin key when applied empty', async () => {
 		routeHolder.query = { cabin: 'business' }
 		const wrapper = render()
-		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
 		// Untick business (prefilled from the URL); index 3 with blank pinned first.
 		const checkboxes = wrapper.findAll('.cabin-checkbox input')
@@ -203,7 +203,7 @@ describe('FilterPicker — cabin', () => {
 describe('FilterPicker — dismissal', () => {
 	it('closes the editor without committing when Cancel is clicked', async () => {
 		const wrapper = render()
-		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
 		expect(wrapper.find('.cancel-btn').exists()).toBe(true)
 		await wrapper.find('.cancel-btn').trigger('click')
@@ -213,7 +213,7 @@ describe('FilterPicker — dismissal', () => {
 
 	it('closes the editor when the user clicks outside the picker', async () => {
 		const wrapper = render()
-		await wrapper.findAll('.action-btn')[1].trigger('click')
+		await wrapper.findAll('.action-btn')[2].trigger('click')
 		await flushPromises()
 		expect(wrapper.find('.cancel-btn').exists()).toBe(true)
 		// pointerdown outside the root
@@ -227,7 +227,7 @@ describe('FilterPicker — dismissal', () => {
 describe('FilterPicker — date range', () => {
 	it('applies both endpoints', async () => {
 		const wrapper = render()
-		await wrapper.findAll('.action-btn')[0].trigger('click')
+		await wrapper.findAll('.action-btn')[1].trigger('click')
 		await flushPromises()
 		const dates = wrapper.findAll('.date-input')
 		await dates[0].setValue('2025-01-01')
@@ -240,6 +240,64 @@ describe('FilterPicker — date range', () => {
 	})
 })
 
+describe('FilterPicker — current year', () => {
+	const currentYearItem = (wrapper: ReturnType<typeof render>) =>
+		wrapper.findAll('.action-btn').find((b) => b.text() === 'Date: current year')
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ['Date'] })
+		vi.setSystemTime(new Date(2026, 5, 15))
+	})
+	afterEach(() => vi.useRealTimers())
+
+	it('splits the date entry in two, ahead of the other filters', async () => {
+		const wrapper = render()
+		expect((await menuItems(wrapper)).slice(0, 3)).toEqual(['Date: current year', 'Date: custom range', 'Cabin class'])
+	})
+
+	it('applies the year straight away, without opening the date editor', async () => {
+		const wrapper = render()
+		await currentYearItem(wrapper)!.trigger('click')
+		await flushPromises()
+		expect(push).toHaveBeenCalledWith({ name: 'flights', query: { dateFrom: '2026-01-01', dateTo: '2026-12-31' } })
+		expect(wrapper.find('.filter-popover').exists()).toBe(false)
+	})
+
+	it('uses the local year on New Year\'s Eve, when UTC is already next year', async () => {
+		const originalTz = process.env.TZ
+		process.env.TZ = 'America/New_York'
+		try {
+			// 20:30 on 31 December in New York.
+			vi.setSystemTime(new Date('2027-01-01T01:30:00Z'))
+			expect(new Date().getTimezoneOffset()).toBe(300)
+			const wrapper = render()
+			await currentYearItem(wrapper)!.trigger('click')
+			expect(push).toHaveBeenCalledWith({ name: 'flights', query: { dateFrom: '2026-01-01', dateTo: '2026-12-31' } })
+		} finally {
+			if (originalTz === undefined) delete process.env.TZ
+			else process.env.TZ = originalTz
+		}
+	})
+
+	it('replaces a custom range and keeps the other filters', async () => {
+		routeHolder.query = { airline: 'EY', dateFrom: '2024-03-01' }
+		const wrapper = render()
+		await currentYearItem(wrapper)!.trigger('click')
+		expect(push).toHaveBeenCalledWith({
+			name: 'flights',
+			query: { airline: 'EY', dateFrom: '2026-01-01', dateTo: '2026-12-31' },
+		})
+	})
+
+	it('hides the item while the current year is applied, but not for another year', () => {
+		routeHolder.query = { dateFrom: '2026-01-01', dateTo: '2026-12-31' }
+		expect(currentYearItem(render())).toBeUndefined()
+
+		routeHolder.query = { dateFrom: '2025-01-01', dateTo: '2025-12-31' }
+		expect(currentYearItem(render())).toBeDefined()
+	})
+})
+
 describe('FilterPicker — airline / aircraft', () => {
 	it('applies an airline filter from ticked checkboxes (CSV in sorted order)', async () => {
 		const flights = [
@@ -248,7 +306,7 @@ describe('FilterPicker — airline / aircraft', () => {
 			flight(3, { airlineCode: 'FZ' }),
 		]
 		const wrapper = render(flights)
-		await wrapper.findAll('.action-btn')[2].trigger('click')
+		await wrapper.findAll('.action-btn')[3].trigger('click')
 		await flushPromises()
 		// A pinned "(blank)" option sits above the sorted code list: blank, EK,
 		// EY, FZ. Tick EK and EY.
@@ -269,7 +327,7 @@ describe('FilterPicker — airline / aircraft', () => {
 			flight(3, { airlineCode: 'FZ' }),
 		]
 		const wrapper = render(flights)
-		await wrapper.findAll('.action-btn')[2].trigger('click')
+		await wrapper.findAll('.action-btn')[3].trigger('click')
 		await flushPromises()
 		// Type "E" — should leave EK and EY, drop FZ. The pinned "(blank)" option
 		// lives outside the searchable list, so it doesn't count here.
@@ -284,7 +342,7 @@ describe('FilterPicker — airline / aircraft', () => {
 			flight(2, { aircraftTypeCode: 'B789' }),
 		]
 		const wrapper = render(flights)
-		await wrapper.findAll('.action-btn')[3].trigger('click')
+		await wrapper.findAll('.action-btn')[4].trigger('click')
 		await flushPromises()
 		// Pinned blank, then sorted: B77W, B789. Tick B77W.
 		const boxes = wrapper.findAll('.cabin-checkbox input')
@@ -299,7 +357,7 @@ describe('FilterPicker — airline / aircraft', () => {
 	it('applies the blank airline sentinel from the pinned option', async () => {
 		const flights = [flight(1, { airlineCode: 'EY' })]
 		const wrapper = render(flights)
-		await wrapper.findAll('.action-btn')[2].trigger('click')
+		await wrapper.findAll('.action-btn')[3].trigger('click')
 		await flushPromises()
 		// boxes[0] is the pinned "(blank)" option.
 		await wrapper.findAll('.cabin-checkbox input')[0].setValue(true)
@@ -311,7 +369,7 @@ describe('FilterPicker — airline / aircraft', () => {
 		routeHolder.query = { airport: 'LHR', airportDir: 'either' }
 		const flights = [flight(1, { airlineCode: 'EY' })]
 		const wrapper = render(flights)
-		await wrapper.findAll('.action-btn')[2].trigger('click')
+		await wrapper.findAll('.action-btn')[3].trigger('click')
 		await flushPromises()
 		// boxes[0] is the pinned "(blank)" option; the single airline EY is boxes[1].
 		await wrapper.findAll('.cabin-checkbox input')[1].setValue(true)
