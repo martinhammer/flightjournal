@@ -57,39 +57,50 @@ class AircraftTypeImportService {
 			$byDesignator[$row['type_designator']][] = $row;
 		}
 
-		$now = time();
-		$imported = 0;
-		$updated = 0;
+		// One transaction, so a failure part-way leaves the previous table intact
+		// rather than half of it re-flagged.
+		return $this->mapper->transactional(function () use ($byDesignator, $skipped): array {
+			// The file decides the default for every designator it lists. Clearing
+			// first is what demotes a stored row the file no longer has, or a
+			// previous default it now ranks lower: the loop below only ever
+			// touches the file's own rows. Designators the file does not mention
+			// are left as they are.
+			$this->mapper->clearCanonical(array_map('strval', array_keys($byDesignator)));
 
-		foreach ($byDesignator as $designator => $group) {
-			$canonicalIndex = $this->pickCanonical($group);
-			foreach ($group as $index => $row) {
-				$existing = $this->mapper->findOneByModel($row['manufacturer'], $row['model']);
-				$entity = $existing ?? new AircraftType();
-				$entity->setIcaoCode($designator);
-				$entity->setManufacturer($row['manufacturer']);
-				$entity->setModel($row['model']);
-				$key = AircraftModelKey::normalize($row['model']);
-				$entity->setModelNormalized($key === '' ? null : $key);
-				$entity->setDescription($this->nullable($row['description'] ?? null));
-				$entity->setEngineType($this->nullable($row['engine_type'] ?? null));
-				$entity->setEngineCount($this->intOrNull($row['engine_count'] ?? null));
-				$entity->setWtc($this->nullable($row['wtc'] ?? null));
-				$entity->setCanonical($index === $canonicalIndex);
-				$entity->setSource(self::SOURCE);
-				$entity->setUpdatedAt($now);
+			$now = time();
+			$imported = 0;
+			$updated = 0;
 
-				if ($existing === null) {
-					$this->mapper->insert($entity);
-					$imported++;
-				} else {
-					$this->mapper->update($entity);
-					$updated++;
+			foreach ($byDesignator as $designator => $group) {
+				$canonicalIndex = $this->pickCanonical($group);
+				foreach ($group as $index => $row) {
+					$existing = $this->mapper->findOneByModel($row['manufacturer'], $row['model']);
+					$entity = $existing ?? new AircraftType();
+					$entity->setIcaoCode($designator);
+					$entity->setManufacturer($row['manufacturer']);
+					$entity->setModel($row['model']);
+					$key = AircraftModelKey::normalize($row['model']);
+					$entity->setModelNormalized($key === '' ? null : $key);
+					$entity->setDescription($this->nullable($row['description'] ?? null));
+					$entity->setEngineType($this->nullable($row['engine_type'] ?? null));
+					$entity->setEngineCount($this->intOrNull($row['engine_count'] ?? null));
+					$entity->setWtc($this->nullable($row['wtc'] ?? null));
+					$entity->setCanonical($index === $canonicalIndex);
+					$entity->setSource(self::SOURCE);
+					$entity->setUpdatedAt($now);
+
+					if ($existing === null) {
+						$this->mapper->insert($entity);
+						$imported++;
+					} else {
+						$this->mapper->update($entity);
+						$updated++;
+					}
 				}
 			}
-		}
 
-		return ['imported' => $imported, 'updated' => $updated, 'skipped' => $skipped];
+			return ['imported' => $imported, 'updated' => $updated, 'skipped' => $skipped];
+		});
 	}
 
 	/**

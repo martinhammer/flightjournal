@@ -19,10 +19,14 @@ class AircraftTypeImportServiceTest extends TestCase {
 	/** @var list<AircraftType> */
 	private array $inserted = [];
 
+	/** @var list<string> What the stand-in transaction did, in order. */
+	private array $log = [];
+
 	protected function setUp(): void {
 		parent::setUp();
 		$this->inserted = [];
-		$this->mapper = $this->createMock(AircraftTypeMapper::class);
+		$this->log = [];
+		$this->mapper = $this->mapperMock();
 		// Empty table: every row is an insert, captured for assertion.
 		$this->mapper->method('findOneByModel')->willReturn(null);
 		$this->mapper->method('insert')->willReturnCallback(function (AircraftType $e): AircraftType {
@@ -30,6 +34,82 @@ class AircraftTypeImportServiceTest extends TestCase {
 			return $e;
 		});
 		$this->service = new AircraftTypeImportService($this->mapper);
+	}
+
+	/**
+	 * A mapper mock whose transactional() runs its callback and logs whether it
+	 * committed or rolled back, as the real atomic() does.
+	 */
+	private function mapperMock(): AircraftTypeMapper&MockObject {
+		$mapper = $this->createMock(AircraftTypeMapper::class);
+		$mapper->method('transactional')->willReturnCallback(function (callable $fn) {
+			$this->log[] = 'begin';
+			try {
+				$result = $fn();
+			} catch (\Throwable $e) {
+				$this->log[] = 'rollback';
+				throw $e;
+			}
+			$this->log[] = 'commit';
+			return $result;
+		});
+		return $mapper;
+	}
+
+	/**
+	 * A mapper over an in-memory table, for re-import tests that need the flags
+	 * as stored rather than as written: findOneByModel, insert, update and
+	 * clearCanonical all act on $table.
+	 *
+	 * @param list<AircraftType> $table
+	 */
+	private function serviceOverTable(array &$table): AircraftTypeImportService {
+		$mapper = $this->mapperMock();
+		$mapper->method('findOneByModel')->willReturnCallback(function (string $manufacturer, string $model) use (&$table) {
+			foreach ($table as $row) {
+				if ($row->getManufacturer() === $manufacturer && $row->getModel() === $model) {
+					return $row;
+				}
+			}
+			return null;
+		});
+		$mapper->method('insert')->willReturnCallback(function (AircraftType $e) use (&$table) {
+			$table[] = $e;
+			return $e;
+		});
+		$mapper->method('update')->willReturnArgument(0);
+		$mapper->method('clearCanonical')->willReturnCallback(function (array $designators) use (&$table): void {
+			$this->log[] = 'clear ' . implode(',', $designators);
+			foreach ($table as $row) {
+				if (in_array($row->getIcaoCode(), $designators, true)) {
+					$row->setCanonical(false);
+				}
+			}
+		});
+		return new AircraftTypeImportService($mapper);
+	}
+
+	private static function stored(string $designator, string $manufacturer, string $model, bool $canonical): AircraftType {
+		$row = new AircraftType();
+		$row->setIcaoCode($designator);
+		$row->setManufacturer($manufacturer);
+		$row->setModel($model);
+		$row->setCanonical($canonical);
+		return $row;
+	}
+
+	/**
+	 * @param list<AircraftType> $table
+	 * @return list<string> "MANUFACTURER model" of each canonical row for $designator
+	 */
+	private static function canonicalsIn(array $table, string $designator): array {
+		$names = [];
+		foreach ($table as $row) {
+			if ($row->getIcaoCode() === $designator && $row->getCanonical()) {
+				$names[] = $row->getManufacturer() . ' ' . $row->getModel();
+			}
+		}
+		return $names;
 	}
 
 	private function csv(string ...$rows): string {
@@ -264,7 +344,7 @@ class AircraftTypeImportServiceTest extends TestCase {
 		$existing->setManufacturer('BOEING');
 		$existing->setModel('737-800');
 
-		$mapper = $this->createMock(AircraftTypeMapper::class);
+		$mapper = $this->mapperMock();
 		$mapper->method('findOneByModel')->willReturn($existing);
 		$mapper->expects($this->never())->method('insert');
 		$mapper->expects($this->once())->method('update')->with($existing);
@@ -274,5 +354,83 @@ class AircraftTypeImportServiceTest extends TestCase {
 
 		$this->assertSame(0, $result['imported']);
 		$this->assertSame(1, $result['updated']);
+	}
+
+	// ---- Re-import: the file decides the default -----------------------------
+
+	public function testReImportDemotesADefaultTheFileNoLongerLists(): void {
+		// A newer extract dropped the old default. Upsert never deletes it, so
+		// without clearing it would stay canonical beside the new pick.
+		$table = [self::stored('B738', 'BOEING', '737-800 (old name)', true)];
+		$service = $this->serviceOverTable($table);
+
+		$service->importCsv($this->csv(
+			'BOEING,737-800,B738,LandPlane,Jet,2,M',
+			'BOEING,737-800 BBJ2,B738,LandPlane,Jet,2,M',
+		));
+
+		$this->assertSame(['BOEING 737-800'], self::canonicalsIn($table, 'B738'));
+		$this->assertCount(3, $table, 'the dropped row is kept, just no longer the default');
+	}
+
+	public function testReImportMovesTheDefaultWhenTheRankingChanges(): void {
+		// The old default is still in the file but now ranks lower.
+		$table = [
+			self::stored('B738', 'BOEING', '737-800 BBJ2', true),
+			self::stored('B738', 'BOEING', '737-800', false),
+		];
+		$service = $this->serviceOverTable($table);
+
+		$service->importCsv($this->csv(
+			'BOEING,737-800 BBJ2,B738,LandPlane,Jet,2,M',
+			'BOEING,737-800,B738,LandPlane,Jet,2,M',
+		));
+
+		$this->assertSame(['BOEING 737-800'], self::canonicalsIn($table, 'B738'));
+	}
+
+	public function testReImportLeavesDesignatorsTheFileDoesNotMention(): void {
+		// A partial file only speaks for the designators it lists.
+		$table = [
+			self::stored('A332', 'AIRBUS', 'A-330-200', true),
+			self::stored('B738', 'BOEING', '737-800', true),
+		];
+		$service = $this->serviceOverTable($table);
+
+		$service->importCsv($this->csv('BOEING,737-800,B738,LandPlane,Jet,2,M'));
+
+		$this->assertSame(['AIRBUS A-330-200'], self::canonicalsIn($table, 'A332'));
+		$this->assertSame(['BOEING 737-800'], self::canonicalsIn($table, 'B738'));
+		$this->assertSame(['begin', 'clear B738', 'commit'], $this->log);
+	}
+
+	public function testImportClearsAndWritesInsideOneTransaction(): void {
+		$this->mapper->method('clearCanonical')->willReturnCallback(function (array $designators): void {
+			$this->log[] = 'clear ' . implode(',', $designators);
+		});
+
+		$this->service->importCsv($this->csv(
+			'BOEING,737-800,B738,LandPlane,Jet,2,M',
+			'AIRBUS,A-330-200,A332,LandPlane,Jet,2,H',
+		));
+
+		$this->assertSame(['begin', 'clear B738,A332', 'commit'], $this->log);
+	}
+
+	public function testAFailedImportRollsBackTheClearedFlags(): void {
+		$mapper = $this->mapperMock();
+		$mapper->method('findOneByModel')->willReturn(null);
+		$mapper->method('clearCanonical')->willReturnCallback(function (): void {
+			$this->log[] = 'clear';
+		});
+		$mapper->method('insert')->willThrowException(new \RuntimeException('value too long'));
+		$service = new AircraftTypeImportService($mapper);
+
+		try {
+			$service->importCsv($this->csv('BOEING,737-800,B738,LandPlane,Jet,2,M'));
+			$this->fail('the database error should propagate');
+		} catch (\RuntimeException) {
+		}
+		$this->assertSame(['begin', 'clear', 'rollback'], $this->log);
 	}
 }

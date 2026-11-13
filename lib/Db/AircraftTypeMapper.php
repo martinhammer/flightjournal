@@ -6,6 +6,7 @@ namespace OCA\FlightJournal\Db;
 
 use OCA\FlightJournal\Service\AircraftModelKey;
 use OCP\AppFramework\Db\QBMapper;
+use OCP\AppFramework\Db\TTransactional;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
@@ -13,6 +14,8 @@ use OCP\IDBConnection;
  * @template-extends QBMapper<AircraftType>
  */
 class AircraftTypeMapper extends QBMapper {
+	use TTransactional;
+
 	/** @psalm-suppress PossiblyUnusedMethod */
 	public function __construct(IDBConnection $db) {
 		parent::__construct($db, 'flightjournal_aircraft_types', AircraftType::class);
@@ -25,6 +28,9 @@ class AircraftTypeMapper extends QBMapper {
 	 * a reference table imported by an older/partial process still resolves.
 	 */
 	public function findCanonicalByDesignator(string $designator): ?AircraftType {
+		// Exactly one canonical row per designator is the importer's invariant
+		// (it clears a designator's flags before setting them); with two, this
+		// would silently resolve to whichever sorts first.
 		$rows = $this->byDesignator($designator, canonicalOnly: true);
 		if ($rows !== []) {
 			return $rows[0];
@@ -93,6 +99,38 @@ class AircraftTypeMapper extends QBMapper {
 			->setMaxResults(2);
 		$rows = $this->findEntities($qb);
 		return count($rows) === 1 ? $rows[0] : null;
+	}
+
+	/**
+	 * Run $fn in one transaction: committed if it returns, rolled back and
+	 * rethrown if it throws. Lives here, beside the connection, so services stay
+	 * free of IDBConnection.
+	 *
+	 * @template T
+	 * @param callable():T $fn
+	 * @return T
+	 */
+	public function transactional(callable $fn): mixed {
+		return $this->atomic($fn, $this->db);
+	}
+
+	/**
+	 * Clear the canonical flag on every stored row of these designators, so an
+	 * import can set it afresh. Without it a row the new file no longer lists —
+	 * or a previous default the new file ranks lower — keeps its flag, leaving
+	 * two canonical rows for one designator.
+	 *
+	 * @param list<string> $designators As stored: the importer upper-cases them.
+	 */
+	public function clearCanonical(array $designators): void {
+		// Chunked: some databases cap the number of items in an IN list.
+		foreach (array_chunk($designators, 1000) as $chunk) {
+			$qb = $this->db->getQueryBuilder();
+			$qb->update($this->getTableName())
+				->set('canonical', $qb->createNamedParameter(false, IQueryBuilder::PARAM_BOOL))
+				->where($qb->expr()->in('icao_code', $qb->createNamedParameter($chunk, IQueryBuilder::PARAM_STR_ARRAY)));
+			$qb->executeStatement();
+		}
 	}
 
 	public function deleteAll(): int {
