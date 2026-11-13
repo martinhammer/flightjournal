@@ -194,7 +194,8 @@ class AircraftTypeMapper extends QBMapper {
 		if ($term === '') {
 			return;
 		}
-		$like = '%' . mb_strtolower($term) . '%';
+		// Escaped, so a typed % or _ is searched for rather than acting as a wildcard.
+		$like = '%' . $this->db->escapeLikeParameter(mb_strtolower($term)) . '%';
 		$param = $qb->createNamedParameter($like);
 		// model_normalized is searched too, so the editor's type-ahead finds what
 		// reconciliation would find: "A320neo" reaches DOC 8643's "A-320neo".

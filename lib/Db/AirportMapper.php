@@ -34,12 +34,12 @@ class AirportMapper extends QBMapper {
 	 */
 	public function findOneByCode(string $code): ?Airport {
 		$qb = $this->db->getQueryBuilder();
-		$param = $qb->createNamedParameter(strtolower($code));
+		$param = $qb->createNamedParameter(self::foldings($code), IQueryBuilder::PARAM_STR_ARRAY);
 		$qb->select('*')
 			->from($this->getTableName())
 			->where($qb->expr()->orX(
-				$qb->expr()->eq($qb->func()->lower('iata'), $param),
-				$qb->expr()->eq($qb->func()->lower('icao'), $param),
+				$qb->expr()->in($qb->func()->lower('iata'), $param),
+				$qb->expr()->in($qb->func()->lower('icao'), $param),
 			))
 			->setMaxResults(1);
 		$rows = $this->findEntities($qb);
@@ -53,9 +53,9 @@ class AirportMapper extends QBMapper {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')
 			->from($this->getTableName())
-			->where($qb->expr()->eq(
+			->where($qb->expr()->in(
 				$qb->func()->lower('name'),
-				$qb->createNamedParameter(strtolower($name)),
+				$qb->createNamedParameter(self::foldings($name), IQueryBuilder::PARAM_STR_ARRAY),
 			))
 			->setMaxResults(2);
 		$rows = $this->findEntities($qb);
@@ -70,7 +70,7 @@ class AirportMapper extends QBMapper {
 	 * @return Airport[]
 	 */
 	public function findByCodes(array $codes): array {
-		$lower = array_values(array_unique(array_map('strtolower', $codes)));
+		$lower = self::foldAll($codes);
 		if ($lower === []) {
 			return [];
 		}
@@ -94,9 +94,9 @@ class AirportMapper extends QBMapper {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')
 			->from($this->getTableName())
-			->where($qb->expr()->eq(
+			->where($qb->expr()->in(
 				$qb->func()->lower('city'),
-				$qb->createNamedParameter(strtolower($city)),
+				$qb->createNamedParameter(self::foldings($city), IQueryBuilder::PARAM_STR_ARRAY),
 			))
 			->setMaxResults(2);
 		return $this->findEntities($qb);
@@ -158,14 +158,16 @@ class AirportMapper extends QBMapper {
 		if ($term === '') {
 			return;
 		}
-		$like = '%' . strtolower($term) . '%';
-		$param = $qb->createNamedParameter($like);
-		$qb->andWhere($qb->expr()->orX(
-			$qb->expr()->like($qb->func()->lower('icao'), $param),
-			$qb->expr()->like($qb->func()->lower('iata'), $param),
-			$qb->expr()->like($qb->func()->lower('name'), $param),
-			$qb->expr()->like($qb->func()->lower('city'), $param),
-		));
+		// Escaped, so a typed % or _ is searched for rather than acting as a
+		// wildcard (the term is bound either way; this is about what it matches).
+		$likes = [];
+		foreach (self::foldings($term) as $folded) {
+			$param = $qb->createNamedParameter('%' . $this->db->escapeLikeParameter($folded) . '%');
+			foreach (['icao', 'iata', 'name', 'city'] as $column) {
+				$likes[] = $qb->expr()->like($qb->func()->lower($column), $param);
+			}
+		}
+		$qb->andWhere($qb->expr()->orX(...$likes));
 	}
 
 	/**
@@ -183,11 +185,43 @@ class AirportMapper extends QBMapper {
 			));
 			return;
 		}
-		$lower = array_values(array_unique(array_map('strtolower', $codes)));
+		$lower = self::foldAll($codes);
 		$param = $qb->createNamedParameter($lower, IQueryBuilder::PARAM_STR_ARRAY);
 		$qb->andWhere($qb->expr()->orX(
 			$qb->expr()->in($qb->func()->lower('iata'), $param),
 			$qb->expr()->in($qb->func()->lower('icao'), $param),
 		));
+	}
+
+	/**
+	 * The lower-cased forms to compare against SQL `LOWER(column)`.
+	 *
+	 * Both, because databases disagree on what `LOWER` folds: MySQL and
+	 * PostgreSQL (in a UTF-8 locale) fold "Ç" to "ç", which only `mb_strtolower`
+	 * matches, while SQLite without ICU folds ASCII only and leaves "Ç" alone,
+	 * which only the ASCII-only `strtolower` matches. Comparing against both
+	 * lets "ÇUKUROVA INTERNATIONAL AIRPORT" find the airport on either kind.
+	 * For an all-ASCII value the two are the same string, so it costs nothing.
+	 *
+	 * @return list<string>
+	 */
+	private static function foldings(string $value): array {
+		return array_values(array_unique([mb_strtolower($value), strtolower($value)]));
+	}
+
+	/**
+	 * {@see foldings()} over a list, de-duplicated.
+	 *
+	 * @param list<string> $values
+	 * @return list<string>
+	 */
+	private static function foldAll(array $values): array {
+		$all = [];
+		foreach ($values as $value) {
+			foreach (self::foldings($value) as $folded) {
+				$all[$folded] = true;
+			}
+		}
+		return array_map('strval', array_keys($all));
 	}
 }

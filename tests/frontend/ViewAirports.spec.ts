@@ -4,13 +4,14 @@ import { mount, flushPromises } from '@vue/test-utils'
 // Covers the search box wiring (catches the v8→v9 `:value`/`modelValue`
 // regression) and the per-row menu navigation to the Flights and Map views.
 
-const { listAirports, push, currentRoute } = vi.hoisted(() => ({
+const { listAirports, getAirportsByCodes, push, currentRoute } = vi.hoisted(() => ({
 	listAirports: vi.fn(),
+	getAirportsByCodes: vi.fn(),
 	push: vi.fn(),
 	currentRoute: { query: {} as Record<string, string> },
 }))
 
-vi.mock('../../src/api.ts', () => ({ listAirports }))
+vi.mock('../../src/api.ts', () => ({ listAirports, getAirportsByCodes }))
 // The views now read the flights store to count flights per row. Mock it with a
 // settable list so each test controls what the counts should be.
 const { flightsStore } = vi.hoisted(() => ({
@@ -72,6 +73,8 @@ beforeEach(() => {
 	flightsStore.fetchAll.mockClear()
 	listAirports.mockReset()
 	listAirports.mockResolvedValue(emptyPage)
+	getAirportsByCodes.mockReset()
+	getAirportsByCodes.mockResolvedValue([])
 	push.mockClear()
 })
 
@@ -112,6 +115,69 @@ describe('ViewAirports search', () => {
 		await flushPromises()
 
 		expect(listAirports).toHaveBeenLastCalledWith('LHR', 100, 0, true)
+	})
+})
+
+/**
+ * The Map view's "View CODE details" sends `?code=`. It must be an exact IATA/ICAO
+ * lookup — the search box's substring match lets "SAN" find San Francisco too —
+ * and must find the airport even when it is not flown: Airports (Show all) →
+ * "Show on map" puts an unflown airport on the map, whose popup links back here.
+ */
+describe('ViewAirports exact code drill-through', () => {
+	const san = { ...lhr, id: 2, iata: 'SAN', icao: 'KSAN', name: 'San Diego International', city: 'San Diego' }
+
+	it('looks the code up exactly, outside the flown-only list', async () => {
+		currentRoute.query = { code: 'SAN' }
+		getAirportsByCodes.mockResolvedValue([san])
+		const wrapper = mount(ViewAirports, { global: { stubs: { ...stubs, NcTextField } } })
+		await flushPromises()
+
+		expect(getAirportsByCodes).toHaveBeenCalledWith(['SAN'])
+		// No substring search for the page (only the two summary probes, limit 1).
+		expect(listAirports).not.toHaveBeenCalledWith('SAN', 100, 0, expect.anything())
+		expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+		expect(wrapper.find('td.name').text()).toBe('San Diego International')
+		expect(wrapper.find('.pager-info').text()).toBe('1–1 of 1')
+		expect(wrapper.findComponent(NcTextField).props('modelValue')).toBe('SAN')
+	})
+
+	it('goes back to the ordinary search once the box is edited', async () => {
+		vi.useFakeTimers()
+		currentRoute.query = { code: 'SAN' }
+		getAirportsByCodes.mockResolvedValue([san])
+		const wrapper = mount(ViewAirports, { global: { stubs: { ...stubs, NcTextField } } })
+		await flushPromises()
+
+		wrapper.findComponent(NcTextField).vm.$emit('update:modelValue', 'SA')
+		await flushPromises()
+		vi.advanceTimersByTime(250)
+		await flushPromises()
+
+		expect(listAirports).toHaveBeenLastCalledWith('SA', 100, 0, true)
+		expect(getAirportsByCodes).toHaveBeenCalledTimes(1)
+	})
+
+	it('goes back to the ordinary search when the switch is flipped', async () => {
+		currentRoute.query = { code: 'SAN' }
+		getAirportsByCodes.mockResolvedValue([san])
+		const wrapper = mount(ViewAirports, { global: { stubs } })
+		await flushPromises()
+
+		await wrapper.find('.switch').trigger('click')
+		await flushPromises()
+
+		expect(listAirports).toHaveBeenLastCalledWith('SAN', 100, 0, false)
+		expect(getAirportsByCodes).toHaveBeenCalledTimes(1)
+	})
+
+	it('names the code when the reference data has no such airport', async () => {
+		currentRoute.query = { code: 'ZZZ' }
+		const wrapper = mount(ViewAirports, { global: { stubs } })
+		await flushPromises()
+
+		const empty = wrapper.findComponent({ name: 'NcEmptyContent' })
+		expect(empty.attributes('description')).toBe('No airport with the code ZZZ in the reference data.')
 	})
 })
 

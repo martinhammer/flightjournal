@@ -245,15 +245,16 @@ function airportPopup(a: Airport, lines: string[]): HTMLElement {
 	}
 
 	// Leaves the Map view, unlike the three above — the reference row for this
-	// airport, reached through the Airports view's own search. Sending the code
-	// rather than the name because `q` matches IATA/ICAO exactly, and because the
-	// search box then shows something the user can recognise and clear.
+	// airport. `code` is an exact IATA/ICAO lookup, not the search box's
+	// substring match (where "SAN" also finds San Francisco), and it finds the
+	// row even when it is not in the flown list: Airports → "Show on map" can
+	// put an unflown airport here.
 	const details = document.createElement('button')
 	details.type = 'button'
 	details.className = 'fj-map-popup__action'
 	details.textContent = `View ${code} details`
 	details.addEventListener('click', () => {
-		router.push({ name: 'airports', query: { q: code } })
+		router.push({ name: 'airports', query: { code } })
 	})
 	el.appendChild(details)
 
