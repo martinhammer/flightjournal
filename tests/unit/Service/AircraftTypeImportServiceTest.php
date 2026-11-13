@@ -356,6 +356,84 @@ class AircraftTypeImportServiceTest extends TestCase {
 		$this->assertSame(1, $result['updated']);
 	}
 
+	// ---- Named overrides (PREFERRED) ------------------------------------------
+
+	/**
+	 * Each override with real DOC 8643 rows from its designator. The next test
+	 * pins what the generic rule picks from the same rows, so an override that
+	 * stops being needed shows up as well as one that stops applying.
+	 *
+	 * @dataProvider namedOverrides
+	 */
+	public function testANamedDesignatorTakesItsPreferredModel(string $designator, array $rows, array $generic, array $preferred): void {
+		$this->service->importCsv($this->csv(...$rows));
+		$this->assertSame($preferred, $this->canonicalOf($designator));
+	}
+
+	public static function namedOverrides(): array {
+		return [
+			'B77L: not the freighter' => ['B77L', [
+				'BOEING,777-200LR,B77L,LandPlane,Jet,2,H',
+				'BOEING,777-F,B77L,LandPlane,Jet,2,H',
+				'BOEING,777-200LR BBJ,B77L,LandPlane,Jet,2,H',
+			], ['BOEING', '777-F'], ['BOEING', '777-200LR']],
+			'DH8A: not the military E-9' => ['DH8A', [
+				'BOMBARDIER,DHC-8-100 Dash 8,DH8A,LandPlane,Turboprop/Turboshaft,2,M',
+				'DE HAVILLAND CANADA,CT-142 Dash 8,DH8A,LandPlane,Turboprop/Turboshaft,2,M',
+				'DE HAVILLAND CANADA,DHC-8-100 Dash 8,DH8A,LandPlane,Turboprop/Turboshaft,2,M',
+				'DE HAVILLAND CANADA,E-9 Dash 8,DH8A,LandPlane,Turboprop/Turboshaft,2,M',
+			], ['DE HAVILLAND CANADA', 'E-9 Dash 8'], ['DE HAVILLAND CANADA', 'DHC-8-100 Dash 8']],
+			'DC10: not the MD-10 conversion' => ['DC10', [
+				'BOEING,MD-10,DC10,LandPlane,Jet,3,H',
+				'MCDONNELL DOUGLAS,DC-10,DC10,LandPlane,Jet,3,H',
+				'MCDONNELL DOUGLAS,KC-10 Extender,DC10,LandPlane,Jet,3,H',
+				'MCDONNELL DOUGLAS,MD-10,DC10,LandPlane,Jet,3,H',
+			], ['BOEING', 'MD-10'], ['MCDONNELL DOUGLAS', 'DC-10']],
+			'C130: not the EC-130' => ['C130', [
+				'LOCKHEED,EC-130 Aya,C130,LandPlane,Turboprop/Turboshaft,4,M',
+				'LOCKHEED,C-130H Hercules,C130,LandPlane,Turboprop/Turboshaft,4,M',
+				'LOCKHEED,C-130 Karnaf,C130,LandPlane,Turboprop/Turboshaft,4,M',
+			], ['LOCKHEED', 'EC-130 Aya'], ['LOCKHEED', 'C-130H Hercules']],
+			'C30J: not the gunship' => ['C30J', [
+				'LOCKHEED MARTIN,AC-130J Ghostrider,C30J,LandPlane,Turboprop/Turboshaft,4,M',
+				'LOCKHEED MARTIN,C-130J Super Hercules,C30J,LandPlane,Turboprop/Turboshaft,4,M',
+				'LOCKHEED MARTIN,KC-130J Super Hercules,C30J,LandPlane,Turboprop/Turboshaft,4,M',
+			], ['LOCKHEED MARTIN', 'AC-130J Ghostrider'], ['LOCKHEED MARTIN', 'C-130J Super Hercules']],
+		];
+	}
+
+	/**
+	 * The generic pick each override replaces, checked on the same rows with
+	 * the override's own row left out — so the "generic" column above is what
+	 * the rule really does, not an assumption.
+	 *
+	 * @dataProvider namedOverrides
+	 */
+	public function testTheGenericRuleIsWhatTheOverrideCorrects(string $designator, array $rows, array $generic, array $preferred): void {
+		$withoutPreferred = array_values(array_filter(
+			$rows, fn (string $row): bool => !str_starts_with($row, implode(',', $preferred) . ',')));
+		$this->service->importCsv($this->csv(...$withoutPreferred));
+		$this->assertSame($generic, $this->canonicalOf($designator));
+	}
+
+	public function testAnOverrideWhoseRowIsMissingFallsBackToTheRule(): void {
+		// A file without the named row (an older or partial extract) still gets
+		// a default, by the generic rule, rather than none.
+		$this->service->importCsv($this->csv(
+			'BOEING,777-F,B77L,LandPlane,Jet,2,H',
+			'BOEING,777-200LR BBJ,B77L,LandPlane,Jet,2,H',
+		));
+		$this->assertSame(['BOEING', '777-F'], $this->canonicalOf('B77L'));
+	}
+
+	public function testAnOverrideMatchesItsRowRegardlessOfCase(): void {
+		$this->service->importCsv($this->csv(
+			'Boeing,777-200lr,b77l,LandPlane,Jet,2,H',
+			'Boeing,777-F,b77l,LandPlane,Jet,2,H',
+		));
+		$this->assertSame(['Boeing', '777-200lr'], $this->canonicalOf('B77L'));
+	}
+
 	// ---- Re-import: the file decides the default -----------------------------
 
 	public function testReImportDemotesADefaultTheFileNoLongerLists(): void {

@@ -762,8 +762,10 @@ class FlightService {
 	 *
 	 * An explicit client-supplied code is honoured as-is together with any
 	 * manufacturer/model sent with it, which is how a JSON backup restores its
-	 * recorded type verbatim on an instance with no reference data. The SPA never
-	 * sends a code, so in practice codes always come from the resolver.
+	 * recorded type verbatim on an instance with no reference data, and how the
+	 * editor's type-ahead pick (any reference row, a designator's non-default
+	 * models included) reaches the flight. Without a pick the SPA sends no code,
+	 * and the resolver decides.
 	 *
 	 * @param array<array-key, mixed> $data
 	 * @return array{0: ?string, 1: ?string, 2: ?string, 3: ?string} [raw, code, manufacturer, model]
