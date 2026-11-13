@@ -23,7 +23,7 @@ import FormatListBulleted from 'vue-material-design-icons/FormatListBulleted.vue
 import MapIcon from 'vue-material-design-icons/Map.vue'
 import { showError } from '@nextcloud/dialogs'
 import { getAirportsByCodes } from '../api.ts'
-import { applyFilters, buildFilters, type ActiveFilter } from '../filters.ts'
+import { applyFilters, buildFilters, narrowToDateFilter, type ActiveFilter } from '../filters.ts'
 import { useFlightsStore } from '../store/flights.ts'
 import { aircraftDisplay, type Airport, type Flight } from '../types.ts'
 import {
@@ -239,15 +239,17 @@ const periodTitle = (i: number) => (series.value.unit === 'month'
 const perUnit = computed(() => (series.value.unit === 'month' ? 'month' : 'year'))
 
 // A column is a month or a year; either drills as a date range.
+// Narrowed to the active date filter: the column counted only the flights
+// inside it, so a range cutting through the period must not be widened.
 function drillPeriod(i: number) {
 	if (series.value.unit === 'year') {
-		drill(yearRange(Number(series.value.labels[i])))
+		drill(narrowToDateFilter(yearRange(Number(series.value.labels[i])), route.query))
 		return
 	}
 	const year = seriesYear.value!
 	const month = String(i + 1).padStart(2, '0')
 	const lastDay = new Date(Date.UTC(year, i + 1, 0)).getUTCDate()
-	drill({ dateFrom: `${year}-${month}-01`, dateTo: `${year}-${month}-${lastDay}` })
+	drill(narrowToDateFilter({ dateFrom: `${year}-${month}-01`, dateTo: `${year}-${month}-${lastDay}` }, route.query))
 }
 
 // --- Distance in context -------------------------------------------------------------------

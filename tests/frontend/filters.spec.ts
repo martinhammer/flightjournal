@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { applyFilters, buildFilters } from '../../src/filters.ts'
+import { applyFilters, buildFilters, narrowToDateFilter } from '../../src/filters.ts'
 import type { Flight } from '../../src/types.ts'
 
 function flight(originCode: string, destinationCode: string): Flight {
@@ -388,5 +388,28 @@ describe('Analytics drill-through filters', () => {
 		]
 		expect(applyFilters(flights, buildFilters({ manufacturer: 'airbus' })).map((f) => f.id)).toEqual([1])
 		expect(applyFilters(flights, buildFilters({ registration: 'D-ASPS' })).map((f) => f.id)).toEqual([1])
+	})
+})
+
+describe('narrowToDateFilter', () => {
+	const year = { dateFrom: '2024-01-01', dateTo: '2024-12-31' }
+
+	it('leaves the period alone when no date filter is set', () => {
+		expect(narrowToDateFilter(year, {})).toEqual(year)
+	})
+
+	it('takes the tighter bound at either end', () => {
+		expect(narrowToDateFilter(year, { dateFrom: '2024-06-01', dateTo: '2025-03-01' }))
+			.toEqual({ dateFrom: '2024-06-01', dateTo: '2024-12-31' })
+		expect(narrowToDateFilter(year, { dateFrom: '2023-01-01', dateTo: '2024-03-15' }))
+			.toEqual({ dateFrom: '2024-01-01', dateTo: '2024-03-15' })
+	})
+
+	it('narrows an open-ended filter on its one side', () => {
+		expect(narrowToDateFilter(year, { dateFrom: '2024-09-10' })).toEqual({ dateFrom: '2024-09-10', dateTo: '2024-12-31' })
+	})
+
+	it('ignores a bound the date filter itself would ignore', () => {
+		expect(narrowToDateFilter(year, { dateFrom: '2024-02-30', dateTo: 'soon' })).toEqual(year)
 	})
 })

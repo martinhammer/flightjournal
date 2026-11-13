@@ -35,6 +35,8 @@ vi.mock('vue-chartjs', () => {
 })
 
 import AnalyticsView from '../../src/views/AnalyticsView.vue'
+import { applyFilters, buildFilters } from '../../src/filters.ts'
+import type { Flight } from '../../src/types.ts'
 import { SLICE_LABEL_PADDING } from '../../src/chartPlugins.ts'
 import { readChartTheme } from '../../src/chartTheme.ts'
 
@@ -242,6 +244,26 @@ describe('AnalyticsView', () => {
 			routeHolder.query = { dateFrom: '2025-01-01', dateTo: '2025-12-31', airline: 'EK' }
 			await clickChart('Flights per month', 2)
 			expect(push).toHaveBeenCalledWith({ name: 'flights', query: { airline: 'EK', dateFrom: '2025-03-01', dateTo: '2025-03-31' } })
+		})
+
+		// A custom range that cuts through the clicked period: the column counted
+		// only the flights inside the range, so the drill must not widen it.
+		it('opens a year only as far as a date filter that cuts through it', async () => {
+			routeHolder.query = { dateFrom: '2024-03-01', dateTo: '2025-03-03' }
+			// Years 2024 and 2025; 2025 counted only 2025-03-03 (not 03-04 or 07-01).
+			await clickChart('Flights per year', 1)
+			const query = { dateFrom: '2025-01-01', dateTo: '2025-03-03' }
+			expect(push).toHaveBeenCalledWith({ name: 'flights', query })
+			expect(applyFilters(store.flights as Flight[], buildFilters(query))).toHaveLength(1)
+		})
+
+		it('opens a month only as far as a date filter that cuts through it', async () => {
+			routeHolder.query = { dateFrom: '2025-03-04', dateTo: '2025-12-31' }
+			// March counted 2025-03-04 only; 2025-03-03 is outside the chip.
+			await clickChart('Flights per month', 2)
+			const query = { dateFrom: '2025-03-04', dateTo: '2025-03-31' }
+			expect(push).toHaveBeenCalledWith({ name: 'flights', query })
+			expect(applyFilters(store.flights as Flight[], buildFilters(query))).toHaveLength(1)
 		})
 
 		it('opens a year from the distance chart', async () => {

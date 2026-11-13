@@ -283,6 +283,14 @@ describe('chart drill-through', () => {
 		flight({ flightDate: '2025-03-10' }),
 	]
 
+	it('labels the last distance bin as including its lower bound', () => {
+		// Membership is km < below, so 8,000 km falls in the last bin, and the
+		// drill-through sends distanceMin=8000 (inclusive).
+		const { counts } = distanceDistribution([flight({ distanceKm: 8000 })])
+		expect(counts.at(-1)).toBe(1)
+		expect(DISTANCE_BINS.at(-1)!.label).toBe('≥ 8,000 km')
+	})
+
 	it('distance bins', () => {
 		const { counts } = distanceDistribution(flights)
 		DISTANCE_BINS.forEach((bin, i) => {
@@ -321,10 +329,10 @@ describe('rankRoutes', () => {
 
 	it('combines both directions, most-flown first, then the longer route', () => {
 		expect(rankRoutes(flights)).toEqual([
-			{ a: 'DXB', b: 'LHR', count: 2, distanceKm: 5470 },
-			{ a: 'BKK', b: 'DXB', count: 1, distanceKm: 4900 },
-			{ a: 'EDI', b: 'LHR', count: 1, distanceKm: 534 },
-			{ a: 'YYY', b: 'ZZZ', count: 1, distanceKm: null },
+			{ a: 'DXB', b: 'LHR', count: 2, distanceKm: 5470, totalKm: 10940 },
+			{ a: 'BKK', b: 'DXB', count: 1, distanceKm: 4900, totalKm: 4900 },
+			{ a: 'EDI', b: 'LHR', count: 1, distanceKm: 534, totalKm: 534 },
+			{ a: 'YYY', b: 'ZZZ', count: 1, distanceKm: null, totalKm: 0 },
 		])
 	})
 
@@ -342,5 +350,31 @@ describe('rankRoutesByDistanceFlown', () => {
 			...route('FRA', 'LHR', 650, 5), ...route('FRA', 'SYD', 16500, 1), ...route('FRA', 'DXB', 4800, 2), ...route('FRA', 'XXX', null, 9),
 		])
 		expect(ranked.map((r) => [`${r.a} ${r.b}`, r.totalKm])).toEqual([['FRA SYD', 16500], ['DXB FRA', 9600], ['FRA LHR', 3250]])
+	})
+
+	it('adds only the legs that have a distance, as the summary does, but counts every leg', () => {
+		// Three DXB–LHR legs, one without a distance (e.g. restored from a backup
+		// that had none): 2 × 5470 flown, not 3 × 5470.
+		const flights = [
+			flight({ originCode: 'DXB', destinationCode: 'LHR', distanceKm: 5470 }),
+			flight({ originCode: 'LHR', destinationCode: 'DXB', distanceKm: null }),
+			flight({ originCode: 'DXB', destinationCode: 'LHR', distanceKm: 5470 }),
+		]
+		const [route] = rankRoutesByDistanceFlown(flights)
+		expect(route.totalKm).toBe(10940)
+		expect(route.totalKm).toBe(summarize(flights, new Map()).distanceKm)
+		// The bubble's size is still every flight on the route, which is what
+		// its "View these flights" drill returns.
+		expect(route.count).toBe(3)
+		expect(applyFilters(flights, buildFilters({ routeA: 'DXB', routeB: 'LHR', routeDir: 'both' }))).toHaveLength(3)
+	})
+
+	it('still ranks a route by its first known distance on the axis when an earlier leg has none', () => {
+		const [route] = rankRoutesByDistanceFlown([
+			flight({ originCode: 'DXB', destinationCode: 'LHR', distanceKm: null }),
+			flight({ originCode: 'DXB', destinationCode: 'LHR', distanceKm: 5470 }),
+		])
+		expect(route.distanceKm).toBe(5470)
+		expect(route.totalKm).toBe(5470)
 	})
 })
