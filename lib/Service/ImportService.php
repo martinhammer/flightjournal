@@ -19,6 +19,10 @@ class ImportService {
 	 * Route format: ORIGIN-DESTINATION (split on the first hyphen).
 	 * Flight format: 2-character airline prefix followed by digits (e.g. SK4745, W61383).
 	 *
+	 * Rows that fail validation are skipped; the rest are written in one
+	 * transaction, so an unexpected database error imports nothing rather than
+	 * a prefix that a retry would then duplicate.
+	 *
 	 * @return array{
 	 *     imported: int,
 	 *     skipped: list<array{line: int, reason: string, raw: string}>,
@@ -26,30 +30,33 @@ class ImportService {
 	 */
 	public function importMarkdownTable(string $userId, string $markdown): array {
 		$rows = $this->parseMarkdownTable($markdown);
-		$imported = 0;
-		$skipped = [];
 
-		foreach ($rows as $row) {
-			try {
-				$data = $this->rowToFlightInput($row['cells']);
-				$this->flights->create($userId, $data);
-				$imported++;
-			} catch (ValidationException $e) {
-				$skipped[] = [
-					'line' => $row['line'],
-					'reason' => $e->getMessage(),
-					'raw' => $row['raw'],
-				];
-			} catch (\InvalidArgumentException $e) {
-				$skipped[] = [
-					'line' => $row['line'],
-					'reason' => $e->getMessage(),
-					'raw' => $row['raw'],
-				];
+		return $this->flights->transactional(function () use ($userId, $rows): array {
+			$imported = 0;
+			$skipped = [];
+
+			foreach ($rows as $row) {
+				try {
+					$data = $this->rowToFlightInput($row['cells']);
+					$this->flights->create($userId, $data);
+					$imported++;
+				} catch (ValidationException $e) {
+					$skipped[] = [
+						'line' => $row['line'],
+						'reason' => $e->getMessage(),
+						'raw' => $row['raw'],
+					];
+				} catch (\InvalidArgumentException $e) {
+					$skipped[] = [
+						'line' => $row['line'],
+						'reason' => $e->getMessage(),
+						'raw' => $row['raw'],
+					];
+				}
 			}
-		}
 
-		return ['imported' => $imported, 'skipped' => $skipped];
+			return ['imported' => $imported, 'skipped' => $skipped];
+		});
 	}
 
 	/**
@@ -63,9 +70,12 @@ class ImportService {
 	 * otherwise derives them. A stored origin/destination code is passed through
 	 * verbatim; rows without a code are reconciled.
 	 *
-	 * When $replace is true the user's existing flights are deleted first — but
-	 * only after the payload has been parsed and structurally validated, so a
-	 * malformed file can never wipe data it then fails to replace.
+	 * When $replace is true the user's existing flights are deleted first. The
+	 * delete and every insert share one transaction, so the old journal survives
+	 * anything that stops the import: a malformed file (rejected before the
+	 * transaction opens), a database error on any row, or a file in which no row
+	 * passes validation — that last case would otherwise replace the journal with
+	 * nothing, so it is refused (rolled back) with the first row's reason.
 	 *
 	 * @return array{
 	 *     imported: int,
@@ -85,27 +95,38 @@ class ImportService {
 			throw new \InvalidArgumentException('Expected a "flights" array of flight objects');
 		}
 
-		// Safe to wipe now: the payload parsed and is structurally valid.
-		$deleted = $replace ? $this->flights->deleteAll($userId) : 0;
+		return $this->flights->transactional(function () use ($userId, $rows, $replace): array {
+			$deleted = $replace ? $this->flights->deleteAll($userId) : 0;
 
-		$imported = 0;
-		$skipped = [];
+			$imported = 0;
+			$skipped = [];
 
-		foreach ($rows as $idx => $row) {
-			$raw = (string)json_encode($row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-			if (!is_array($row)) {
-				$skipped[] = ['line' => $idx + 1, 'reason' => 'Entry is not an object', 'raw' => $raw];
-				continue;
+			foreach ($rows as $idx => $row) {
+				$raw = (string)json_encode($row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+				if (!is_array($row)) {
+					$skipped[] = ['line' => $idx + 1, 'reason' => 'Entry is not an object', 'raw' => $raw];
+					continue;
+				}
+				try {
+					$this->flights->restore($userId, $this->jsonRowToFlightInput($row));
+					$imported++;
+				} catch (ValidationException|\InvalidArgumentException $e) {
+					$skipped[] = ['line' => $idx + 1, 'reason' => $e->getMessage(), 'raw' => $raw];
+				}
 			}
-			try {
-				$this->flights->restore($userId, $this->jsonRowToFlightInput($row));
-				$imported++;
-			} catch (ValidationException|\InvalidArgumentException $e) {
-				$skipped[] = ['line' => $idx + 1, 'reason' => $e->getMessage(), 'raw' => $raw];
-			}
-		}
 
-		return ['imported' => $imported, 'skipped' => $skipped, 'deleted' => $deleted];
+			if ($replace && $imported === 0) {
+				// Thrown inside the transaction, so the delete above is rolled back.
+				$reason = $skipped === []
+					? 'the file contains no flights'
+					: "entry {$skipped[0]['line']}: {$skipped[0]['reason']}";
+				throw new \InvalidArgumentException(
+					"Nothing to replace your flights with ($reason). Your existing flights were kept.",
+				);
+			}
+
+			return ['imported' => $imported, 'skipped' => $skipped, 'deleted' => $deleted];
+		});
 	}
 
 	/**

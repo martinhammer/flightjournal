@@ -13,6 +13,31 @@ class FlightService {
 	private const ALLOWED_CABIN_CLASSES = ['economy', 'premium_economy', 'business', 'first', 'other'];
 
 	/**
+	 * Widths of the flight's varchar columns (Version0001, Version0004), as
+	 * [label, max characters]. Checked before any write: SQLite does not enforce
+	 * VARCHAR(n), so the test suite never sees an overflow, but MySQL (strict)
+	 * and PostgreSQL reject the statement — a 500 on save, and partway through
+	 * an import.
+	 */
+	private const MAX_LENGTHS = [
+		'originCode' => ['Origin code', 8],
+		'destinationCode' => ['Destination code', 8],
+		'originLabel' => ['Origin', 128],
+		'destinationLabel' => ['Destination', 128],
+		'airlineCode' => ['Airline code', 4],
+		'flightNumber' => ['Flight number', 8],
+		'aircraftTypeCode' => ['Aircraft type code', 8],
+		'aircraftTypeRaw' => ['Aircraft type', 64],
+		'aircraftManufacturer' => ['Aircraft manufacturer', 64],
+		'aircraftModel' => ['Aircraft model', 64],
+		'registration' => ['Registration', 16],
+		'seat' => ['Seat', 8],
+	];
+
+	/** Largest value of a (signed, 32-bit) Types::INTEGER column. */
+	private const INT32_MAX = 2147483647;
+
+	/**
 	 * Fields a bulk update may set. The rest — date, seat, notes — describe one
 	 * leg, so setting them to the same value across many makes no sense.
 	 */
@@ -71,6 +96,7 @@ class FlightService {
 	 */
 	public function restore(string $userId, array $data): Flight {
 		$this->validate($data);
+		$this->validateBackupNumbers($data);
 		$flight = new Flight();
 		$flight->setUserId($userId);
 		$this->applyData($flight, $data);
@@ -224,6 +250,7 @@ class FlightService {
 		if ($hasReferenceModel && $this->str($changes, 'aircraftTypeCode') === null) {
 			throw new ValidationException('aircraftManufacturer and aircraftModel require aircraftTypeCode');
 		}
+		$this->validateLengths($changes);
 	}
 
 	/**
@@ -323,6 +350,19 @@ class FlightService {
 
 	public function deleteAll(string $userId): int {
 		return $this->mapper->deleteAllForUser($userId);
+	}
+
+	/**
+	 * Run several calls on this service as one unit: committed if $fn returns,
+	 * rolled back and rethrown if it throws. For a caller, like an import, whose
+	 * writes must land together or not at all.
+	 *
+	 * @template T
+	 * @param callable():T $fn
+	 * @return T
+	 */
+	public function transactional(callable $fn): mixed {
+		return $this->mapper->transactional($fn);
 	}
 
 	/**
@@ -510,8 +550,13 @@ class FlightService {
 		if ($date === null) {
 			throw new ValidationException('flightDate is required');
 		}
-		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+		if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $parts)) {
 			throw new ValidationException('flightDate must be YYYY-MM-DD');
+		}
+		// The shape alone lets 2026-02-31 through, which SQLite stores and a DATE
+		// column on MySQL/PostgreSQL rejects.
+		if (!checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1])) {
+			throw new ValidationException("flightDate $date is not a calendar date");
 		}
 
 		$hasOrigin = $this->str($data, 'originCode') !== null || $this->str($data, 'originLabel') !== null;
@@ -526,6 +571,42 @@ class FlightService {
 		$cabin = $this->str($data, 'cabinClass');
 		if ($cabin !== null && !in_array($cabin, self::ALLOWED_CABIN_CLASSES, true)) {
 			throw new ValidationException('Invalid cabinClass');
+		}
+		$this->validateLengths($data);
+	}
+
+	/**
+	 * Reject a value wider than its column. Measured on the trimmed value, as
+	 * stored. A label replaced by a reference airport name still fits: the
+	 * reference name column is no wider than the label's.
+	 *
+	 * @param array<array-key, mixed> $data
+	 */
+	private function validateLengths(array $data): void {
+		foreach (self::MAX_LENGTHS as $key => [$label, $max]) {
+			$value = $this->str($data, $key);
+			if ($value !== null && mb_strlen($value) > $max) {
+				throw new ValidationException("$label must be at most $max characters");
+			}
+		}
+	}
+
+	/**
+	 * Range-check the numbers only a backup carries. day_seq and distance_km
+	 * are 32-bit INTEGER columns, and a value past that range is a database
+	 * error (and with it, the whole import) rather than a skipped row. The
+	 * timestamps are BIGINT, which any PHP int fits.
+	 *
+	 * @param array<array-key, mixed> $data
+	 */
+	private function validateBackupNumbers(array $data): void {
+		$daySeq = $this->int($data, 'daySeq');
+		if ($daySeq !== null && $daySeq > self::INT32_MAX) {
+			throw new ValidationException('daySeq must be at most ' . self::INT32_MAX);
+		}
+		$distance = $this->int($data, 'distanceKm');
+		if ($distance !== null && ($distance < 0 || $distance > self::INT32_MAX)) {
+			throw new ValidationException('distanceKm must be between 0 and ' . self::INT32_MAX);
 		}
 	}
 

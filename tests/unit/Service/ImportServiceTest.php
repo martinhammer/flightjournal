@@ -14,10 +14,25 @@ use PHPUnit\Framework\TestCase;
 class ImportServiceTest extends TestCase {
 	private FlightService&MockObject $flights;
 	private ImportService $importer;
+	/** @var list<string> What the stand-in transaction did, in order. */
+	private array $transactions = [];
 
 	protected function setUp(): void {
 		parent::setUp();
 		$this->flights = $this->createMock(FlightService::class);
+		// Stand-in for the mapper's atomic(): runs $fn, and records whether it
+		// committed or rolled back (and rethrew), as the real one does.
+		$this->flights->method('transactional')->willReturnCallback(function (callable $fn) {
+			$this->transactions[] = 'begin';
+			try {
+				$result = $fn();
+			} catch (\Throwable $e) {
+				$this->transactions[] = 'rollback';
+				throw $e;
+			}
+			$this->transactions[] = 'commit';
+			return $result;
+		});
 		$this->importer = new ImportService($this->flights);
 	}
 
@@ -235,6 +250,99 @@ class ImportServiceTest extends TestCase {
 
 		$this->assertSame(1, $result['imported']);
 		$this->assertSame(7, $result['deleted']);
+	}
+
+	public function testJsonImportWithReplaceDeletesAndInsertsInOneTransaction(): void {
+		$json = json_encode(['flights' => [
+			['flightDate' => '2026-05-01', 'originLabel' => 'CPH', 'destinationLabel' => 'LHR'],
+		]]);
+		$this->flights->method('deleteAll')->willReturnCallback(function () {
+			$this->transactions[] = 'deleteAll';
+			return 7;
+		});
+		$this->flights->method('restore')->willReturnCallback(function () {
+			$this->transactions[] = 'restore';
+			return new Flight();
+		});
+
+		$this->importer->importJson('alice', (string)$json, true);
+
+		$this->assertSame(['begin', 'deleteAll', 'restore', 'commit'], $this->transactions);
+	}
+
+	public function testJsonImportWithReplaceRollsBackTheDeleteOnADatabaseError(): void {
+		// A row the database rejects is not a validation skip: it must abort the
+		// import and roll back the delete, not leave a half-replaced journal.
+		$json = json_encode(['flights' => [
+			['flightDate' => '2026-05-01', 'originLabel' => 'CPH', 'destinationLabel' => 'LHR'],
+			['flightDate' => '2026-05-02', 'originLabel' => 'LHR', 'destinationLabel' => 'CPH'],
+		]]);
+		$this->flights->expects($this->once())->method('deleteAll')->willReturn(7);
+		$this->flights->method('restore')->willReturnOnConsecutiveCalls(
+			new Flight(),
+			$this->throwException(new \RuntimeException('value too long for type character varying(4)')),
+		);
+
+		try {
+			$this->importer->importJson('alice', (string)$json, true);
+			$this->fail('the database error should propagate');
+		} catch (\RuntimeException $e) {
+			$this->assertStringContainsString('character varying', $e->getMessage());
+		}
+		$this->assertSame(['begin', 'rollback'], $this->transactions);
+	}
+
+	public function testJsonImportWithReplaceKeepsTheJournalWhenNoRowIsValid(): void {
+		// {"flights":[{}]} parses and is a list, but replacing the journal with it
+		// would leave nothing — refused, and the delete rolled back.
+		$this->flights->expects($this->once())->method('deleteAll')->willReturn(7);
+		$this->flights->method('restore')->willThrowException(new ValidationException('flightDate is required'));
+
+		try {
+			$this->importer->importJson('alice', '{"flights":[{}]}', true);
+			$this->fail('an import with nothing to replace the journal with should be refused');
+		} catch (\InvalidArgumentException $e) {
+			$this->assertStringContainsString('entry 1: flightDate is required', $e->getMessage());
+			$this->assertStringContainsString('existing flights were kept', $e->getMessage());
+		}
+		$this->assertSame(['begin', 'rollback'], $this->transactions);
+	}
+
+	public function testJsonImportWithReplaceKeepsTheJournalForAnEmptyFile(): void {
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('the file contains no flights');
+		$this->importer->importJson('alice', '{"flights":[]}', true);
+	}
+
+	public function testJsonAppendWithNoValidRowsStillReportsTheSkips(): void {
+		// Appending nothing destroys nothing, so the skips are reported as usual.
+		$this->flights->expects($this->never())->method('deleteAll');
+		$this->flights->method('restore')->willThrowException(new ValidationException('flightDate is required'));
+
+		$result = $this->importer->importJson('alice', '{"flights":[{}]}');
+
+		$this->assertSame(0, $result['imported']);
+		$this->assertCount(1, $result['skipped']);
+		$this->assertSame(['begin', 'commit'], $this->transactions);
+	}
+
+	public function testMarkdownImportRollsBackEveryRowOnADatabaseError(): void {
+		// Otherwise the rows before the failure stay, and a retry duplicates them.
+		$markdown = <<<MD
+		| 2026/05/01 | SK4745 | CPH-LHR | B738 | OY-KAL |
+		| 2026/05/02 | SK4746 | LHR-CPH | B738 | OY-KAL |
+		MD;
+		$this->flights->method('create')->willReturnOnConsecutiveCalls(
+			new Flight(),
+			$this->throwException(new \RuntimeException('database error')),
+		);
+
+		$this->expectException(\RuntimeException::class);
+		try {
+			$this->importer->importMarkdownTable('alice', $markdown);
+		} finally {
+			$this->assertSame(['begin', 'rollback'], $this->transactions);
+		}
 	}
 
 	public function testJsonImportWithReplaceDoesNotWipeOnMalformedJson(): void {
