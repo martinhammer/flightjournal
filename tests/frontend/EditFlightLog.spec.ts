@@ -186,3 +186,19 @@ describe('EditFlightLog save failure', () => {
 		expect(push).not.toHaveBeenCalled()
 	})
 })
+
+describe('EditFlightLog load failure', () => {
+	it('says why the flights could not be loaded and goes back, instead of a blank form', async () => {
+		store.loaded = false
+		store.fetchAll.mockRejectedValueOnce(serverError('Database unavailable'))
+		try {
+			mount(EditFlightLog, { global: { stubs } })
+			await flushPromises()
+
+			expect(showError).toHaveBeenCalledWith('Database unavailable')
+			expect(push).toHaveBeenCalledWith(expect.objectContaining({ path: '/flights' }))
+		} finally {
+			store.loaded = true
+		}
+	})
+})

@@ -62,7 +62,15 @@ async function load() {
 		backToFlights()
 		return
 	}
-	if (!store.loaded) await store.fetchAll()
+	if (!store.loaded) {
+		try {
+			await store.fetchAll()
+		} catch (e: unknown) {
+			showError(ocsErrorMessage(e, 'Failed to load flights'))
+			backToFlights()
+			return
+		}
+	}
 	const existing = store.flights.find((f) => f.id === flightId.value)
 	if (!existing) {
 		showError('Flight not found')

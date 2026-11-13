@@ -29,6 +29,7 @@ import ChartBar from 'vue-material-design-icons/ChartBar.vue'
 import CheckAll from 'vue-material-design-icons/CheckAll.vue'
 import CheckboxMultipleMarkedOutline from 'vue-material-design-icons/CheckboxMultipleMarkedOutline.vue'
 import { useCardLayout } from '../useCardLayout.ts'
+import { ocsErrorMessage } from '../ocsError.ts'
 
 type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
 type SortDir = 'asc' | 'desc'
@@ -65,8 +66,20 @@ function viewFlightOnMap(f: Flight) {
 	router.push({ name: 'map', query: { flight: String(f.id) } })
 }
 
+// A failed load must not read as an empty journal: the store keeps the error,
+// and the template shows it with a retry instead of "No flights yet".
+async function load() {
+	try {
+		await store.fetchAll()
+	} catch (e: unknown) {
+		showError(ocsErrorMessage(e, 'Failed to load flights'))
+	}
+}
+
+const loadErrorMessage = computed(() => ocsErrorMessage(store.loadError, 'The server could not be reached.'))
+
 onMounted(() => {
-	if (!store.loaded) store.fetchAll()
+	if (!store.loaded) load()
 	window.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
@@ -154,7 +167,12 @@ const hasDaySiblings = (i: number) => canReorder.value && (sameDayPrev(i) || sam
 
 // Translate the visual chevron into a day-order move. With the newest day on top
 // (date desc) the up chevron pushes a leg later in the day; ascending flips it.
+//
+// Until a move's refetch lands, the rows on screen are not the day's real
+// order, so a further move would aim at the wrong neighbour; it is ignored
+// rather than the chevrons disabled, which would drop keyboard focus.
 async function move(f: Flight, isUp: boolean) {
+	if (store.moving) return
 	const direction = isUp === (sortDir.value === 'desc') ? 'later' : 'earlier'
 	try {
 		await store.move(f.id, direction)
@@ -432,7 +450,18 @@ async function remove(f: Flight) {
 				</NcButton>
 			</div>
 			<NcEmptyContent
-				v-if="store.flights.length === 0"
+				v-if="store.loadError && !store.loaded"
+				class="load-error"
+				name="Could not load your flights"
+				:description="loadErrorMessage">
+				<template #action>
+					<NcButton @click="load">
+						Try again
+					</NcButton>
+				</template>
+			</NcEmptyContent>
+			<NcEmptyContent
+				v-else-if="store.flights.length === 0"
 				name="No flights yet"
 				description="Add your first flight to get started." />
 			<NcEmptyContent

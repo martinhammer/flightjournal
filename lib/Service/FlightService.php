@@ -320,27 +320,67 @@ class FlightService {
 	 * toward leg 1 (lower day_seq), "later" away from it. The view translates its
 	 * up/down chevron into one of these based on the active sort direction.
 	 *
+	 * The day's legs are read locked and both writes share one transaction, so
+	 * two moves that overlap — a quick double click is enough, since Nextcloud
+	 * releases the session lock before the controller runs — queue up rather
+	 * than both swapping from the same stale order, and a failure between the
+	 * writes cannot leave two legs on one day_seq.
+	 *
+	 * A tie can still exist from before (a restored backup may carry duplicate
+	 * daySeq values). Tied legs could never be swapped apart, so a move that
+	 * meets one first renumbers the day 1..N in its current order.
+	 *
 	 * @param string $direction Either "earlier" or "later".
 	 */
 	public function move(int $id, string $userId, string $direction): Flight {
 		if ($direction !== 'earlier' && $direction !== 'later') {
 			throw new ValidationException('direction must be "earlier" or "later"');
 		}
-		$flight = $this->find($id, $userId);
-		$neighbor = $this->mapper->findSwapNeighbor($flight, $direction);
-		if ($neighbor === null) {
-			return $flight;
-		}
+		$date = $this->find($id, $userId)->getFlightDate();
 
-		$flightSeq = $flight->getDaySeq();
-		$flight->setDaySeq($neighbor->getDaySeq());
-		$neighbor->setDaySeq($flightSeq);
-		$now = $this->time->getTime();
-		$flight->setUpdatedAt($now);
-		$neighbor->setUpdatedAt($now);
-		$this->mapper->update($neighbor);
-		$this->mapper->update($flight);
-		return $flight;
+		return $this->mapper->transactional(function () use ($id, $userId, $date, $direction): Flight {
+			$day = $this->mapper->findDayForUpdate($userId, $date);
+			$index = null;
+			foreach ($day as $i => $leg) {
+				if ($leg->getId() === $id) {
+					$index = $i;
+				}
+			}
+			if ($index === null) {
+				// Its date was changed by a request that committed after the
+				// lookup above, so it has no neighbour on this day any more.
+				return $this->find($id, $userId);
+			}
+			$flight = $day[$index];
+			$neighborIndex = $direction === 'earlier' ? $index - 1 : $index + 1;
+			if ($neighborIndex < 0 || $neighborIndex >= count($day)) {
+				return $flight;
+			}
+			$neighbor = $day[$neighborIndex];
+
+			/** @var array<int, Flight> $changed */
+			$changed = [];
+			if ($neighbor->getDaySeq() === $flight->getDaySeq()) {
+				foreach ($day as $i => $leg) {
+					if ($leg->getDaySeq() !== $i + 1) {
+						$leg->setDaySeq($i + 1);
+						$changed[$leg->getId()] = $leg;
+					}
+				}
+			}
+			$flightSeq = $flight->getDaySeq();
+			$flight->setDaySeq($neighbor->getDaySeq());
+			$neighbor->setDaySeq($flightSeq);
+			$changed[$neighbor->getId()] = $neighbor;
+			$changed[$flight->getId()] = $flight;
+
+			$now = $this->time->getTime();
+			foreach ($changed as $leg) {
+				$leg->setUpdatedAt($now);
+				$this->mapper->update($leg);
+			}
+			return $flight;
+		});
 	}
 
 	public function delete(int $id, string $userId): void {

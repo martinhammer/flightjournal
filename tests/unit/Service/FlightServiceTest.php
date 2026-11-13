@@ -403,40 +403,109 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame(3, $result->getDaySeq(), 'editing other fields leaves order untouched');
 	}
 
-	public function testMoveSwapsDaySeqWithNeighbor(): void {
-		$flight = new Flight();
-		$flight->setUserId('alice');
-		$flight->setFlightDate('2026-05-01');
-		$flight->setDaySeq(2);
+	/** @var list<int> Ids a move wrote, in order. */
+	private array $written = [];
 
-		$neighbor = new Flight();
-		$neighbor->setUserId('alice');
-		$neighbor->setFlightDate('2026-05-01');
-		$neighbor->setDaySeq(1);
+	/**
+	 * Legs of 2026-05-01 as the locked read returns them (day order), with the
+	 * stand-in transaction checking that every write happens inside it.
+	 *
+	 * @param array<int, int> $seqById id => day_seq, in day order
+	 * @return array<int, Flight>
+	 */
+	private function lockedDay(array $seqById): array {
+		$legs = [];
+		foreach ($seqById as $id => $seq) {
+			$leg = new Flight();
+			$leg->setId($id);
+			$leg->setUserId('alice');
+			$leg->setFlightDate('2026-05-01');
+			$leg->setDaySeq($seq);
+			$legs[$id] = $leg;
+		}
+		$first = reset($legs);
+		$this->mapper->method('findForUser')->willReturnCallback(
+			fn (int $id) => $legs[$id] ?? $first);
+		$this->mapper->method('findDayForUpdate')->with('alice', '2026-05-01')->willReturn(array_values($legs));
+		$inTransaction = false;
+		$this->mapper->method('transactional')->willReturnCallback(function (callable $fn) use (&$inTransaction) {
+			$inTransaction = true;
+			try {
+				return $fn();
+			} finally {
+				$inTransaction = false;
+			}
+		});
+		$this->mapper->method('update')->willReturnCallback(function (Flight $f) use (&$inTransaction) {
+			$this->assertTrue($inTransaction, 'a move writes only inside its transaction');
+			$this->written[] = $f->getId();
+			return $f;
+		});
+		return $legs;
+	}
 
-		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($flight);
-		$this->mapper->method('findSwapNeighbor')->with($flight, 'earlier')->willReturn($neighbor);
-		$this->mapper->expects($this->exactly(2))->method('update')->willReturnArgument(0);
+	public function testMoveSwapsDaySeqWithTheEarlierNeighbor(): void {
+		$legs = $this->lockedDay([1 => 1, 7 => 2]);
+		$this->mapper->expects($this->exactly(2))->method('update');
 
 		$result = $this->service->move(7, 'alice', 'earlier');
 
 		$this->assertSame(1, $result->getDaySeq(), 'moved flight takes the neighbor seq');
-		$this->assertSame(2, $neighbor->getDaySeq(), 'neighbor takes the moved flight seq');
+		$this->assertSame(2, $legs[1]->getDaySeq(), 'neighbor takes the moved flight seq');
+	}
+
+	public function testMoveLaterSwapsWithTheNextLegAcrossAGap(): void {
+		// Gaps are left by deletes and mean nothing; only the order counts.
+		$legs = $this->lockedDay([7 => 2, 3 => 5, 4 => 9]);
+
+		$this->service->move(7, 'alice', 'later');
+
+		$this->assertSame(5, $legs[7]->getDaySeq());
+		$this->assertSame(2, $legs[3]->getDaySeq());
+		$this->assertSame(9, $legs[4]->getDaySeq(), 'the leg beyond is untouched');
 	}
 
 	public function testMoveIsNoOpAtEdgeOfDay(): void {
-		$flight = new Flight();
-		$flight->setUserId('alice');
-		$flight->setFlightDate('2026-05-01');
-		$flight->setDaySeq(1);
-
-		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($flight);
-		$this->mapper->method('findSwapNeighbor')->with($flight, 'earlier')->willReturn(null);
+		$legs = $this->lockedDay([7 => 1, 8 => 2]);
 		$this->mapper->expects($this->never())->method('update');
 
 		$result = $this->service->move(7, 'alice', 'earlier');
 
 		$this->assertSame(1, $result->getDaySeq(), 'order unchanged when already first');
+		$this->assertSame(2, $legs[8]->getDaySeq());
+	}
+
+	public function testMoveSeparatesLegsThatShareADaySeq(): void {
+		// Two legs on one day_seq (a backup with duplicates, or the old race) used
+		// to be unswappable: neither is strictly before the other.
+		$legs = $this->lockedDay([1 => 1, 7 => 1, 3 => 3]);
+
+		$this->service->move(7, 'alice', 'earlier');
+
+		$this->assertSame(1, $legs[7]->getDaySeq());
+		$this->assertSame(2, $legs[1]->getDaySeq());
+		$this->assertSame(3, $legs[3]->getDaySeq());
+		$this->assertEqualsCanonicalizing([1, 7], $this->written, 'a leg already in place is not rewritten');
+	}
+
+	public function testMoveIsNoOpWhenTheFlightLeftTheDayMeanwhile(): void {
+		// Id 7 was looked up on 2026-05-01, but by the time the day is locked a
+		// concurrent edit has moved it to another date.
+		$legs = $this->lockedDay([1 => 1, 2 => 2]);
+
+		$result = $this->service->move(7, 'alice', 'earlier');
+
+		$this->assertSame($legs[1], $result, 'the fresh lookup (the stub answers with leg 1)');
+		$this->assertSame([], $this->written);
+		$this->assertSame(1, $legs[1]->getDaySeq());
+	}
+
+	public function testMoveLooksUpTheFlightBeforeLocking(): void {
+		// Another user's id is a 404 before any lock is taken.
+		$this->mapper->method('findForUser')->willThrowException(new DoesNotExistException('nope'));
+		$this->mapper->expects($this->never())->method('findDayForUpdate');
+		$this->expectException(NotFoundException::class);
+		$this->service->move(7, 'bob', 'earlier');
 	}
 
 	public function testMoveRejectsBadDirection(): void {
