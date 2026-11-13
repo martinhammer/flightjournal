@@ -88,6 +88,37 @@ describe('AirportResolution', () => {
 		expect(lastKind(wrapper)).toBe('idle')
 	})
 
+	/**
+	 * Edited text must drop the old answer at once, not after the debounce: the
+	 * bulk editor allows Apply only on a settled kind, so a "matched" lingering
+	 * for 300 ms would let new text be applied under the old match.
+	 */
+	it('drops the previous result as soon as the text changes', async () => {
+		const wrapper = await settle(mount(AirportResolution, { props: { label: 'LHR' } }))
+		expect(lastKind(wrapper)).toBe('matched')
+
+		await wrapper.setProps({ label: 'Nowhere' })
+
+		expect(wrapper.text()).toBe('Checking reference data…')
+		expect(lastKind(wrapper)).toBe('checking')
+	})
+
+	it('drops an in-flight result for text that has since changed', async () => {
+		let release: (v: unknown) => void = () => {}
+		resolveAirport.mockReturnValueOnce(new Promise((r) => { release = r }))
+		const wrapper = mount(AirportResolution, { props: { label: 'LHR' } })
+		await vi.advanceTimersByTimeAsync(300)
+
+		resolveAirport.mockResolvedValue(noMatch)
+		await wrapper.setProps({ label: 'Nowhere' })
+		release(matched)
+		await flushPromises()
+		expect(lastKind(wrapper)).toBe('checking')
+
+		await settle(wrapper)
+		expect(lastKind(wrapper)).toBe('unmatched')
+	})
+
 	it('reports a failed lookup rather than implying no match', async () => {
 		resolveAirport.mockRejectedValue(new Error('offline'))
 		const wrapper = await settle(mount(AirportResolution, { props: { label: 'LHR' } }))

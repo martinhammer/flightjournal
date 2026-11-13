@@ -60,6 +60,11 @@ watch(() => props.label, (label) => {
 		state.value = { kind: 'idle' }
 		return
 	}
+	// The previous result described different text: drop it now, not when the
+	// debounce fires, so the bulk editor never applies new text under an old
+	// "Matches …" (it waits for a settled kind before allowing Apply).
+	token++
+	state.value = { kind: 'checking' }
 	timer = setTimeout(() => check(text), DEBOUNCE_MS)
 }, { immediate: true })
 

@@ -261,10 +261,20 @@ function toggleAll(checked: boolean) {
 	}
 }
 
-// Esc also closes the bulk-edit dialog; that press must not clear the selection
-// it is editing.
+// Esc belongs to whatever is on top, and only an Esc nothing else took clears the
+// selection. An NcActions menu (row, sort, Add filter) and the filter editor
+// close and call preventDefault; a dialog (bulk edit, Add flight) closes without
+// it, hence the bulk-edit flag and the modal-mask check — the same test
+// @nextcloud/vue's own hotkeys use to stand aside for a modal.
 function onKeydown(e: KeyboardEvent) {
-	if (e.key === 'Escape' && (selecting.value || selectMode.value) && !bulkEditOpen.value) clearSelection()
+	if (e.key !== 'Escape' || e.defaultPrevented) return
+	if (!(selecting.value || selectMode.value) || bulkEditOpen.value || modalOpen()) return
+	clearSelection()
+}
+
+function modalOpen(): boolean {
+	return Array.from(document.getElementsByClassName('modal-mask'))
+		.some((el) => (el as HTMLElement).checkVisibility?.() ?? true)
 }
 
 const headerCount = computed(() => {
@@ -488,13 +498,17 @@ async function remove(f: Flight) {
 							v-for="col in columns"
 							:key="col.key"
 							:class="{ sorted: sortKey === col.key, numeric: col.key === 'distance' }"
+							:aria-sort="sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined"
 							role="columnheader">
+							<!-- aria-sort belongs on the header cell, and only the sorted
+								 one carries it. The button repeats the direction in its
+								 name, since tabbing to it may not announce the cell's state. -->
 							<button
 								type="button"
 								class="sort-button"
-								:aria-sort="sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
 								@click="setSort(col.key)">
 								<span>{{ col.label }}</span>
+								<span v-if="sortKey === col.key" class="hidden-visually">, sorted {{ sortDir === 'asc' ? 'ascending' : 'descending' }}</span>
 								<span class="sort-indicator">
 									<MenuUp v-if="sortKey === col.key && sortDir === 'asc'" :size="16" />
 									<MenuDown v-else-if="sortKey === col.key && sortDir === 'desc'" :size="16" />

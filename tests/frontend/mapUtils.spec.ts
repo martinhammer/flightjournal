@@ -117,6 +117,20 @@ describe('orderedRouteDirections', () => {
 		expect(orderedRouteDirections('LHR', 'JFK', flights)).toEqual([['LHR', 'JFK'], ['JFK', 'LHR']])
 	})
 
+	// Both directions on the first day: the day's first leg leads, even though
+	// the store lists the day newest-first (its last leg comes first).
+	it('breaks a same-day tie by day order, then id', () => {
+		const sameDay = { flightDate: '2020-01-01' }
+		const flights = [
+			{ ...flight({ originCode: 'JFK', destinationCode: 'LHR' }), ...sameDay, id: 1, daySeq: 2 },
+			{ ...flight({ originCode: 'LHR', destinationCode: 'JFK' }), ...sameDay, id: 2, daySeq: 1 },
+		]
+		expect(orderedRouteDirections('JFK', 'LHR', flights)).toEqual([['LHR', 'JFK'], ['JFK', 'LHR']])
+
+		const tied = flights.map((f) => ({ ...f, daySeq: 1 }))
+		expect(orderedRouteDirections('LHR', 'JFK', tied)).toEqual([['JFK', 'LHR'], ['LHR', 'JFK']])
+	})
+
 	it('falls back to alphabetical order when no flight resolves it', () => {
 		expect(orderedRouteDirections('LHR', 'JFK', [])).toEqual([['JFK', 'LHR'], ['LHR', 'JFK']])
 	})

@@ -367,6 +367,24 @@ describe('ViewFlightLog within-day reordering', () => {
 		expect(reorderButtons(wrapper, 1)[0].attributes('disabled')).toBeUndefined()
 	})
 
+	/**
+	 * ARIA allows aria-sort only on the header cell, and on one header at a time.
+	 * The button also says the direction, since a screen reader tabbing to it may
+	 * not announce the cell's state.
+	 */
+	it('marks the sorted column on its header cell, not the button', async () => {
+		const wrapper = render()
+		const sorted = () => wrapper.findAll('th[aria-sort]')
+		expect(sorted()).toHaveLength(1)
+		expect(sorted()[0].attributes('aria-sort')).toBe('descending')
+		expect(sorted()[0].find('.sort-button').text()).toBe('Date, sorted descending')
+		expect(wrapper.find('.sort-button[aria-sort]').exists()).toBe(false)
+
+		await wrapper.findAll('th .sort-button')[0].trigger('click')
+		expect(sorted()[0].attributes('aria-sort')).toBe('ascending')
+		expect(sorted()[0].find('.sort-button').text()).toBe('Date, sorted ascending')
+	})
+
 	it('flips the chevron mapping when the date sort is ascending', async () => {
 		const wrapper = render()
 		// Toggle the Date column to ascending: now the earliest leg is on top.
@@ -464,6 +482,39 @@ describe('ViewFlightLog row selection', () => {
 		await nextTick()
 		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
 		wrapper.unmount()
+	})
+
+	/**
+	 * An Escape that something on top already took — an NcActions menu or the
+	 * filter editor, both of which call preventDefault — only closes that.
+	 */
+	it('keeps the selection when Escape was taken by a menu', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await rowBoxes(wrapper)[0].trigger('click')
+		const press = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+		press.preventDefault()
+		window.dispatchEvent(press)
+		await nextTick()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+		wrapper.unmount()
+	})
+
+	// A dialog (Add flight is mounted in App.vue) closes on Escape without
+	// preventDefault; an open modal mask is what says the press is the dialog's.
+	it('keeps the selection when Escape closes a dialog', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await rowBoxes(wrapper)[0].trigger('click')
+		const mask = document.createElement('div')
+		mask.className = 'modal-mask'
+		document.body.appendChild(mask)
+		try {
+			window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+			await nextTick()
+			expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+		} finally {
+			mask.remove()
+			wrapper.unmount()
+		}
 	})
 
 	it('does not open the editor when the checkbox cell is double-clicked', async () => {

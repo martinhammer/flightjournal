@@ -222,6 +222,33 @@ describe('FilterPicker — dismissal', () => {
 		expect(wrapper.find('.cancel-btn').exists()).toBe(false)
 		expect(push).not.toHaveBeenCalled()
 	})
+
+	/**
+	 * Escape closes the editor and marks the press as taken (preventDefault),
+	 * which is what stops the Flights view's own Escape from also clearing a
+	 * selection behind it.
+	 */
+	it('closes the editor on Escape, and claims the key press', async () => {
+		const wrapper = render()
+		await wrapper.findAll('.action-btn')[2].trigger('click')
+		await flushPromises()
+
+		const press = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+		document.dispatchEvent(press)
+		await flushPromises()
+
+		expect(wrapper.find('.cancel-btn').exists()).toBe(false)
+		expect(press.defaultPrevented).toBe(true)
+		expect(push).not.toHaveBeenCalled()
+	})
+
+	it('leaves an Escape alone once the editor is closed', async () => {
+		render()
+		await flushPromises()
+		const press = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+		document.dispatchEvent(press)
+		expect(press.defaultPrevented).toBe(false)
+	})
 })
 
 describe('FilterPicker — date range', () => {

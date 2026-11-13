@@ -80,7 +80,10 @@ export function countFlightsByRoute(flights: Flight[]): Map<string, number> {
 }
 
 // The two directional orderings [from, to] of a route pair, with the
-// oldest-flown direction first. Falls back to alphabetical by code when no
+// oldest-flown direction first. "Oldest" is the journal's own order — date,
+// then day_seq, then id — so when both directions were flown on the first day,
+// that day's first leg leads (the list arrives newest-first, so the first row
+// seen is the day's last leg). Falls back to alphabetical by code when no
 // flight resolves the order.
 export function orderedRouteDirections(a: string, b: string, flights: Flight[]): [string, string][] {
 	const codeA = a.toUpperCase()
@@ -90,7 +93,7 @@ export function orderedRouteDirections(a: string, b: string, flights: Flight[]):
 		const o = (f.originCode ?? '').toUpperCase()
 		const d = (f.destinationCode ?? '').toUpperCase()
 		const onRoute = (o === codeA && d === codeB) || (o === codeB && d === codeA)
-		if (onRoute && (oldest === null || f.flightDate < oldest.flightDate)) {
+		if (onRoute && (oldest === null || flownBefore(f, oldest))) {
 			oldest = f
 		}
 	}
@@ -101,6 +104,12 @@ export function orderedRouteDirections(a: string, b: string, flights: Flight[]):
 	}
 	const sorted = [codeA, codeB].sort()
 	return [[sorted[0], sorted[1]], [sorted[1], sorted[0]]]
+}
+
+function flownBefore(a: Flight, b: Flight): boolean {
+	if (a.flightDate !== b.flightDate) return a.flightDate < b.flightDate
+	if (a.daySeq !== b.daySeq) return a.daySeq < b.daySeq
+	return a.id < b.id
 }
 
 // The directional [from, to] pairs of a route that were actually flown,
