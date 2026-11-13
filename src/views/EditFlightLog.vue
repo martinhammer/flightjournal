@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import NcButton from '@nextcloud/vue/components/NcButton'
+import NcTextArea from '@nextcloud/vue/components/NcTextArea'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNative'
@@ -62,7 +63,15 @@ async function load() {
 		backToFlights()
 		return
 	}
-	if (!store.loaded) await store.fetchAll()
+	if (!store.loaded) {
+		try {
+			await store.fetchAll()
+		} catch (e: unknown) {
+			showError(ocsErrorMessage(e, 'Failed to load flights'))
+			backToFlights()
+			return
+		}
+	}
 	const existing = store.flights.find((f) => f.id === flightId.value)
 	if (!existing) {
 		showError('Flight not found')
@@ -184,8 +193,11 @@ function cancel() {
 				<NcTextField label="Seat" :model-value="form.seat ?? ''" @update:model-value="(v: string | number) => form.seat = String(v) || null" />
 			</div>
 			<div class="row">
-				<label>Notes</label>
-				<textarea v-model="form.notes" rows="3" />
+				<NcTextArea
+					label="Notes"
+					:rows="3"
+					:model-value="form.notes ?? ''"
+					@update:model-value="(v: string) => form.notes = v || null" />
 			</div>
 			<div class="actions">
 				<NcButton variant="primary" type="submit" :disabled="saving">
@@ -242,15 +254,6 @@ function cancel() {
 	.row.half > * {
 		grid-column: 1 / -1;
 	}
-}
-
-textarea {
-	width: 100%;
-	padding: 8px;
-	border-radius: var(--border-radius);
-	border: 1px solid var(--color-border);
-	background: var(--color-main-background);
-	color: var(--color-main-text);
 }
 
 .actions {

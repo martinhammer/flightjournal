@@ -319,8 +319,8 @@ describe('BulkEditDialog origin and destination', () => {
 		field(wrapper, 'originLabel').find('.text-field').setValue(text)
 
 	/** Stand in for the preview line settling on a result. */
-	async function resolvesAs(wrapper: Awaited<ReturnType<typeof mountOpen>>, kind: string) {
-		field(wrapper, 'originLabel').findComponent({ name: 'AirportResolution' }).vm.$emit('update:kind', kind)
+	async function resolvesAs(wrapper: Awaited<ReturnType<typeof mountOpen>>, kind: string, key = 'originLabel') {
+		field(wrapper, key).findComponent({ name: 'AirportResolution' }).vm.$emit('update:kind', kind)
 		await wrapper.vm.$nextTick()
 	}
 
@@ -337,6 +337,7 @@ describe('BulkEditDialog origin and destination', () => {
 	it('sends the new origin, trimmed, for every flight', async () => {
 		const wrapper = await openOrigin()
 		await typeOrigin(wrapper, ' DUB ')
+		await resolvesAs(wrapper, 'matched')
 		await applyButton(wrapper).trigger('click')
 		expect(store.bulkUpdate).toHaveBeenCalledWith([1, 2, 3], { originLabel: 'DUB' })
 	})
@@ -357,7 +358,40 @@ describe('BulkEditDialog origin and destination', () => {
 		expect(applyButton(wrapper).attributes('disabled')).toBeDefined()
 
 		await typeOrigin(wrapper, 'DUB')
+		await resolvesAs(wrapper, 'matched')
 		expect(applyButton(wrapper).attributes('disabled')).toBeUndefined()
+	})
+
+	/**
+	 * The preview has to be about the text now in the field before Apply is
+	 * possible: applied under a stale "Matches …", new text would clear the code
+	 * and distance on every selected leg with no warning ever shown.
+	 */
+	it('waits for the preview of the current text before allowing Apply', async () => {
+		const wrapper = await openOrigin()
+		await typeOrigin(wrapper, 'LHR')
+		await resolvesAs(wrapper, 'matched')
+		expect(applyButton(wrapper).attributes('disabled')).toBeUndefined()
+
+		await typeOrigin(wrapper, 'Nowhere')
+		await resolvesAs(wrapper, 'checking')
+		expect(applyButton(wrapper).attributes('disabled')).toBeDefined()
+		await applyButton(wrapper).trigger('click')
+		expect(store.bulkUpdate).not.toHaveBeenCalled()
+
+		await resolvesAs(wrapper, 'unmatched')
+		expect(applyButton(wrapper).attributes('disabled')).toBeUndefined()
+	})
+
+	it('warns, but still allows Apply, when the lookup failed', async () => {
+		const wrapper = await openOrigin()
+		await typeOrigin(wrapper, 'Nowhere')
+		await resolvesAs(wrapper, 'error')
+		expect(warning(wrapper).text()).toBe(
+			'The reference data could not be checked. If this text does not match an airport, all 3 flights will lose their origin airport code and distance.',
+		)
+		await applyButton(wrapper).trigger('click')
+		expect(store.bulkUpdate).toHaveBeenCalledWith([1, 2, 3], { originLabel: 'Nowhere' })
 	})
 
 	it('warns how many flights lose their code when the text matches nothing', async () => {
@@ -412,6 +446,8 @@ describe('BulkEditDialog origin and destination', () => {
 		await typeOrigin(wrapper, 'DUB')
 		await field(wrapper, 'destinationLabel').find('.switch input').trigger('click')
 		await field(wrapper, 'destinationLabel').find('.text-field').setValue('FRA')
+		await resolvesAs(wrapper, 'matched')
+		await resolvesAs(wrapper, 'matched', 'destinationLabel')
 		await applyButton(wrapper).trigger('click')
 		expect(store.bulkUpdate).toHaveBeenCalledWith([1, 2, 3], { originLabel: 'DUB', destinationLabel: 'FRA' })
 	})

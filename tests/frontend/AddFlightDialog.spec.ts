@@ -44,6 +44,20 @@ beforeEach(() => {
 	vi.mocked(showError).mockClear()
 })
 
+describe('AddFlightDialog notes', () => {
+	it('lets a note be entered on create', async () => {
+		store.create.mockResolvedValueOnce({})
+		const wrapper = await mountFilled()
+		const textarea = wrapper.find('textarea')
+		expect(wrapper.find(`label[for="${textarea.attributes('id')}"]`).text()).toBe('Notes')
+
+		await textarea.setValue('First flight on the A380')
+		await wrapper.find('.nc-button').trigger('click')
+		await flushPromises()
+		expect(store.create).toHaveBeenCalledWith(expect.objectContaining({ notes: 'First flight on the A380' }))
+	})
+})
+
 describe('AddFlightDialog save failure', () => {
 	it('shows the server\'s validation message and stays open', async () => {
 		store.create.mockRejectedValueOnce(serverError('Invalid cabinClass'))

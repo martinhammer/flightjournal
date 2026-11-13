@@ -4,6 +4,7 @@ import NcButton from '@nextcloud/vue/components/NcButton'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
 import NcDateTimePickerNative from '@nextcloud/vue/components/NcDateTimePickerNative'
 import NcSelect from '@nextcloud/vue/components/NcSelect'
+import NcTextArea from '@nextcloud/vue/components/NcTextArea'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
 import { ocsErrorMessage } from '../ocsError.ts'
@@ -137,6 +138,13 @@ async function add() {
 			</div>
 			<div class="row half">
 				<NcTextField label="Seat" :model-value="form.seat ?? ''" @update:model-value="(v: string | number) => form.seat = String(v) || null" />
+			</div>
+			<div class="row">
+				<NcTextArea
+					label="Notes"
+					:rows="3"
+					:model-value="form.notes ?? ''"
+					@update:model-value="(v: string) => form.notes = v || null" />
 			</div>
 		</div>
 		<template #actions>

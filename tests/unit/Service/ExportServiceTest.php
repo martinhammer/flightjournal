@@ -66,6 +66,21 @@ class ExportServiceTest extends TestCase {
 		$this->assertArrayNotHasKey('id', $row);
 	}
 
+	public function testMarkdownTypeCellIsTheModelWithoutTheManufacturer(): void {
+		// Deliberately not the Aircraft column's "BOEING 737-800": the cell is
+		// re-imported into aircraft_type_raw, and only the bare model reconciles.
+		$flight = $this->makeFlight();
+		$flight->setAircraftTypeCode('B738');
+		$flight->setAircraftManufacturer('BOEING');
+		$flight->setAircraftModel('737-800');
+		$this->flights->method('findAll')->willReturn([$flight]);
+
+		$markdown = $this->exporter->exportMarkdownTable('alice');
+
+		$this->assertStringContainsString('| 737-800 |', $markdown);
+		$this->assertStringNotContainsString('BOEING', $markdown);
+	}
+
 	public function testEmptyExportStillProducesValidEnvelope(): void {
 		$this->flights->method('findAll')->willReturn([]);
 		$decoded = json_decode($this->exporter->exportJson('alice'), true);

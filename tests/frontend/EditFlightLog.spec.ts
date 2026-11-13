@@ -113,6 +113,19 @@ describe('EditFlightLog save', () => {
 		}))
 	})
 
+	// A real NcTextArea (not stubbed), so the label is associated with the
+	// control and an edited note reaches the save.
+	it('labels the notes field and saves what is typed in it', async () => {
+		const wrapper = await mountLoaded()
+		const textarea = wrapper.find('textarea')
+		expect(wrapper.find(`label[for="${textarea.attributes('id')}"]`).text()).toBe('Notes')
+
+		await textarea.setValue('Window seat, great view')
+		await wrapper.find('form').trigger('submit')
+		await flushPromises()
+		expect(store.update).toHaveBeenCalledWith(1, expect.objectContaining({ notes: 'Window seat, great view' }))
+	})
+
 	/**
 	 * The feedback line must follow the field as it is edited, not the value the
 	 * flight was loaded with — otherwise it keeps reporting the stale result
@@ -184,5 +197,21 @@ describe('EditFlightLog save failure', () => {
 
 		expect(showError).toHaveBeenCalledWith('flightDate must be YYYY-MM-DD')
 		expect(push).not.toHaveBeenCalled()
+	})
+})
+
+describe('EditFlightLog load failure', () => {
+	it('says why the flights could not be loaded and goes back, instead of a blank form', async () => {
+		store.loaded = false
+		store.fetchAll.mockRejectedValueOnce(serverError('Database unavailable'))
+		try {
+			mount(EditFlightLog, { global: { stubs } })
+			await flushPromises()
+
+			expect(showError).toHaveBeenCalledWith('Database unavailable')
+			expect(push).toHaveBeenCalledWith(expect.objectContaining({ path: '/flights' }))
+		} finally {
+			store.loaded = true
+		}
 	})
 })

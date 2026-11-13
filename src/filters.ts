@@ -59,6 +59,29 @@ function isoDate(value: unknown): string | null {
 	return d.toISOString().slice(0, 10) === value ? value : null
 }
 
+/**
+ * A date range narrowed to the date filter already in a query, so a drill-through
+ * into a month or year never widens it: with the chip at 2024-06-01 → 2024-12-31,
+ * the 2024 column opens June–December, the flights it counted, not all of 2024.
+ * Bounds the filter itself would ignore (not a real date) are ignored here too.
+ *
+ * @param range The period being opened, both ends inclusive.
+ * @param range.dateFrom Its first day.
+ * @param range.dateTo Its last day.
+ * @param query The current route query.
+ */
+export function narrowToDateFilter(
+	range: { dateFrom: string, dateTo: string },
+	query: LocationQuery,
+): { dateFrom: string, dateTo: string } {
+	const from = isoDate(query.dateFrom)
+	const to = isoDate(query.dateTo)
+	return {
+		dateFrom: from && from > range.dateFrom ? from : range.dateFrom,
+		dateTo: to && to < range.dateTo ? to : range.dateTo,
+	}
+}
+
 // A whole number ≥ 0 from the query, or null. Rejects junk rather than letting
 // it filter everything out.
 function nonNegative(value: unknown): number | null {

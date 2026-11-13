@@ -172,6 +172,80 @@ class FlightServiceTest extends TestCase {
 		}
 	}
 
+	/**
+	 * The shape check alone let these through; SQLite stores them, MySQL and
+	 * PostgreSQL reject the insert.
+	 *
+	 * @dataProvider impossibleDates
+	 */
+	public function testCreateRejectsADateThatIsNotOnTheCalendar(string $date): void {
+		$this->mapper->expects($this->never())->method('insert');
+		$this->expectException(ValidationException::class);
+		$this->expectExceptionMessage('not a calendar date');
+		$this->service->create('alice', $this->validData(['flightDate' => $date]));
+	}
+
+	public static function impossibleDates(): array {
+		return [
+			'31 February' => ['2026-02-31'],
+			'29 February, not a leap year' => ['2026-02-29'],
+			'month 13' => ['2026-13-01'],
+			'day 0' => ['2026-05-00'],
+			'year 0' => ['0000-01-01'],
+		];
+	}
+
+	public function testCreateAcceptsALeapDay(): void {
+		$this->mapper->method('insert')->willReturnArgument(0);
+		$flight = $this->service->create('alice', $this->validData(['flightDate' => '2024-02-29']));
+		$this->assertSame('2024-02-29', $flight->getFlightDate());
+	}
+
+	/**
+	 * One value one character over its column's width, per column. SQLite (the
+	 * CI database) does not enforce VARCHAR(n), so only this check catches it.
+	 *
+	 * @dataProvider overlongFields
+	 */
+	public function testCreateRejectsAValueWiderThanItsColumn(string $key, int $max, string $label): void {
+		$this->mapper->expects($this->never())->method('insert');
+		$this->expectException(ValidationException::class);
+		$this->expectExceptionMessage("$label must be at most $max characters");
+		$this->service->create('alice', $this->validData([$key => str_repeat('X', $max + 1)]));
+	}
+
+	public static function overlongFields(): array {
+		return [
+			'origin code' => ['originCode', 8, 'Origin code'],
+			'destination code' => ['destinationCode', 8, 'Destination code'],
+			'origin' => ['originLabel', 128, 'Origin'],
+			'destination' => ['destinationLabel', 128, 'Destination'],
+			'airline code' => ['airlineCode', 4, 'Airline code'],
+			'flight number' => ['flightNumber', 8, 'Flight number'],
+			'aircraft type code' => ['aircraftTypeCode', 8, 'Aircraft type code'],
+			'aircraft type' => ['aircraftTypeRaw', 64, 'Aircraft type'],
+			'aircraft manufacturer' => ['aircraftManufacturer', 64, 'Aircraft manufacturer'],
+			'aircraft model' => ['aircraftModel', 64, 'Aircraft model'],
+			'registration' => ['registration', 16, 'Registration'],
+			'seat' => ['seat', 8, 'Seat'],
+		];
+	}
+
+	public function testCreateMeasuresLengthInCharactersAfterTrimming(): void {
+		$this->mapper->method('insert')->willReturnArgument(0);
+		// 8 characters but 9 bytes, padded with spaces that are trimmed before storing.
+		$flight = $this->service->create('alice', $this->validData(['seat' => '  12A/14CÇ  ']));
+		$this->assertSame('12A/14CÇ', $flight->getSeat());
+	}
+
+	public function testUpdateValidatesLengthsBeforeWriting(): void {
+		$this->mapper->method('findForUser')->willReturn($this->reconciledFlight());
+		$this->mapper->expects($this->never())->method('update');
+		$this->expectException(ValidationException::class);
+		$this->expectExceptionMessage('Seat must be at most 8 characters');
+		$this->service->update(1, 'alice', $this->validData(['seat' => '12A, 12B, 12C']));
+	}
+
 	public function testUpdateModifiesExistingFlight(): void {
 		$existing = new Flight();
 		$existing->setUserId('alice');
@@ -329,40 +403,109 @@ class FlightServiceTest extends TestCase {
 		$this->assertSame(3, $result->getDaySeq(), 'editing other fields leaves order untouched');
 	}
 
-	public function testMoveSwapsDaySeqWithNeighbor(): void {
-		$flight = new Flight();
-		$flight->setUserId('alice');
-		$flight->setFlightDate('2026-05-01');
-		$flight->setDaySeq(2);
+	/** @var list<int> Ids a move wrote, in order. */
+	private array $written = [];
 
-		$neighbor = new Flight();
-		$neighbor->setUserId('alice');
-		$neighbor->setFlightDate('2026-05-01');
-		$neighbor->setDaySeq(1);
+	/**
+	 * Legs of 2026-05-01 as the locked read returns them (day order), with the
+	 * stand-in transaction checking that every write happens inside it.
+	 *
+	 * @param array<int, int> $seqById id => day_seq, in day order
+	 * @return array<int, Flight>
+	 */
+	private function lockedDay(array $seqById): array {
+		$legs = [];
+		foreach ($seqById as $id => $seq) {
+			$leg = new Flight();
+			$leg->setId($id);
+			$leg->setUserId('alice');
+			$leg->setFlightDate('2026-05-01');
+			$leg->setDaySeq($seq);
+			$legs[$id] = $leg;
+		}
+		$first = reset($legs);
+		$this->mapper->method('findForUser')->willReturnCallback(
+			fn (int $id) => $legs[$id] ?? $first);
+		$this->mapper->method('findDayForUpdate')->with('alice', '2026-05-01')->willReturn(array_values($legs));
+		$inTransaction = false;
+		$this->mapper->method('transactional')->willReturnCallback(function (callable $fn) use (&$inTransaction) {
+			$inTransaction = true;
+			try {
+				return $fn();
+			} finally {
+				$inTransaction = false;
+			}
+		});
+		$this->mapper->method('update')->willReturnCallback(function (Flight $f) use (&$inTransaction) {
+			$this->assertTrue($inTransaction, 'a move writes only inside its transaction');
+			$this->written[] = $f->getId();
+			return $f;
+		});
+		return $legs;
+	}
 
-		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($flight);
-		$this->mapper->method('findSwapNeighbor')->with($flight, 'earlier')->willReturn($neighbor);
-		$this->mapper->expects($this->exactly(2))->method('update')->willReturnArgument(0);
+	public function testMoveSwapsDaySeqWithTheEarlierNeighbor(): void {
+		$legs = $this->lockedDay([1 => 1, 7 => 2]);
+		$this->mapper->expects($this->exactly(2))->method('update');
 
 		$result = $this->service->move(7, 'alice', 'earlier');
 
 		$this->assertSame(1, $result->getDaySeq(), 'moved flight takes the neighbor seq');
-		$this->assertSame(2, $neighbor->getDaySeq(), 'neighbor takes the moved flight seq');
+		$this->assertSame(2, $legs[1]->getDaySeq(), 'neighbor takes the moved flight seq');
+	}
+
+	public function testMoveLaterSwapsWithTheNextLegAcrossAGap(): void {
+		// Gaps are left by deletes and mean nothing; only the order counts.
+		$legs = $this->lockedDay([7 => 2, 3 => 5, 4 => 9]);
+
+		$this->service->move(7, 'alice', 'later');
+
+		$this->assertSame(5, $legs[7]->getDaySeq());
+		$this->assertSame(2, $legs[3]->getDaySeq());
+		$this->assertSame(9, $legs[4]->getDaySeq(), 'the leg beyond is untouched');
 	}
 
 	public function testMoveIsNoOpAtEdgeOfDay(): void {
-		$flight = new Flight();
-		$flight->setUserId('alice');
-		$flight->setFlightDate('2026-05-01');
-		$flight->setDaySeq(1);
-
-		$this->mapper->method('findForUser')->with(7, 'alice')->willReturn($flight);
-		$this->mapper->method('findSwapNeighbor')->with($flight, 'earlier')->willReturn(null);
+		$legs = $this->lockedDay([7 => 1, 8 => 2]);
 		$this->mapper->expects($this->never())->method('update');
 
 		$result = $this->service->move(7, 'alice', 'earlier');
 
 		$this->assertSame(1, $result->getDaySeq(), 'order unchanged when already first');
+		$this->assertSame(2, $legs[8]->getDaySeq());
+	}
+
+	public function testMoveSeparatesLegsThatShareADaySeq(): void {
+		// Two legs on one day_seq (a backup with duplicates, or the old race) used
+		// to be unswappable: neither is strictly before the other.
+		$legs = $this->lockedDay([1 => 1, 7 => 1, 3 => 3]);
+
+		$this->service->move(7, 'alice', 'earlier');
+
+		$this->assertSame(1, $legs[7]->getDaySeq());
+		$this->assertSame(2, $legs[1]->getDaySeq());
+		$this->assertSame(3, $legs[3]->getDaySeq());
+		$this->assertEqualsCanonicalizing([1, 7], $this->written, 'a leg already in place is not rewritten');
+	}
+
+	public function testMoveIsNoOpWhenTheFlightLeftTheDayMeanwhile(): void {
+		// Id 7 was looked up on 2026-05-01, but by the time the day is locked a
+		// concurrent edit has moved it to another date.
+		$legs = $this->lockedDay([1 => 1, 2 => 2]);
+
+		$result = $this->service->move(7, 'alice', 'earlier');
+
+		$this->assertSame($legs[1], $result, 'the fresh lookup (the stub answers with leg 1)');
+		$this->assertSame([], $this->written);
+		$this->assertSame(1, $legs[1]->getDaySeq());
+	}
+
+	public function testMoveLooksUpTheFlightBeforeLocking(): void {
+		// Another user's id is a 404 before any lock is taken.
+		$this->mapper->method('findForUser')->willThrowException(new DoesNotExistException('nope'));
+		$this->mapper->expects($this->never())->method('findDayForUpdate');
+		$this->expectException(NotFoundException::class);
+		$this->service->move(7, 'bob', 'earlier');
 	}
 
 	public function testMoveRejectsBadDirection(): void {
@@ -569,6 +712,40 @@ class FlightServiceTest extends TestCase {
 		$this->mapper->expects($this->never())->method('insert');
 		$this->expectException(ValidationException::class);
 		$this->service->restore('alice', ['flightDate' => 'bad']);
+	}
+
+	/**
+	 * day_seq and distance_km are 32-bit INTEGER columns: past that range the
+	 * insert is a database error (found on MariaDB), so it must be a skip.
+	 *
+	 * @dataProvider outOfRangeBackupNumbers
+	 */
+	public function testRestoreRejectsABackupNumberOutsideItsColumn(string $key, int $value, string $message): void {
+		$this->mapper->expects($this->never())->method('insert');
+		$this->expectException(ValidationException::class);
+		$this->expectExceptionMessage($message);
+		$this->service->restore('alice', $this->validData([$key => $value]));
+	}
+
+	public static function outOfRangeBackupNumbers(): array {
+		return [
+			'day order past INT' => ['daySeq', 2147483648, 'daySeq must be at most 2147483647'],
+			'distance past INT' => ['distanceKm', 3000000000, 'distanceKm must be between 0 and 2147483647'],
+			'negative distance' => ['distanceKm', -1, 'distanceKm must be between 0 and 2147483647'],
+		];
+	}
+
+	public function testRestoreAcceptsBackupNumbersAtTheEdgeOfTheirColumn(): void {
+		$this->mapper->method('insert')->willReturnArgument(0);
+		$flight = $this->service->restore('alice', $this->validData([
+			'daySeq' => 2147483647,
+			'distanceKm' => 0,
+			// BIGINT: any PHP int fits, so the timestamps are not range-checked.
+			'createdAt' => PHP_INT_MAX,
+		]));
+		$this->assertSame(2147483647, $flight->getDaySeq());
+		$this->assertSame(0, $flight->getDistanceKm());
+		$this->assertSame(PHP_INT_MAX, $flight->getCreatedAt());
 	}
 
 	public function testReconcileAllRecomputesDistanceWhenBothSidesResolve(): void {
@@ -1244,6 +1421,7 @@ class FlightServiceTest extends TestCase {
 			'non-string value' => [[7], ['registration' => 12]],
 			'invalid cabin' => [[7], ['cabinClass' => 'steerage']],
 			'model without designator' => [[7], ['aircraftModel' => '737-800']],
+			'value wider than its column' => [[7], ['airlineCode' => 'Lufthansa']],
 		];
 	}
 

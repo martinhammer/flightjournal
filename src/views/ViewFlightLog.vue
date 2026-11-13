@@ -29,6 +29,7 @@ import ChartBar from 'vue-material-design-icons/ChartBar.vue'
 import CheckAll from 'vue-material-design-icons/CheckAll.vue'
 import CheckboxMultipleMarkedOutline from 'vue-material-design-icons/CheckboxMultipleMarkedOutline.vue'
 import { useCardLayout } from '../useCardLayout.ts'
+import { ocsErrorMessage } from '../ocsError.ts'
 
 type SortKey = 'date' | 'flight' | 'route' | 'distance' | 'aircraft' | 'registration' | 'cabin' | 'seat'
 type SortDir = 'asc' | 'desc'
@@ -65,8 +66,20 @@ function viewFlightOnMap(f: Flight) {
 	router.push({ name: 'map', query: { flight: String(f.id) } })
 }
 
+// A failed load must not read as an empty journal: the store keeps the error,
+// and the template shows it with a retry instead of "No flights yet".
+async function load() {
+	try {
+		await store.fetchAll()
+	} catch (e: unknown) {
+		showError(ocsErrorMessage(e, 'Failed to load flights'))
+	}
+}
+
+const loadErrorMessage = computed(() => ocsErrorMessage(store.loadError, 'The server could not be reached.'))
+
 onMounted(() => {
-	if (!store.loaded) store.fetchAll()
+	if (!store.loaded) load()
 	window.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
@@ -154,7 +167,12 @@ const hasDaySiblings = (i: number) => canReorder.value && (sameDayPrev(i) || sam
 
 // Translate the visual chevron into a day-order move. With the newest day on top
 // (date desc) the up chevron pushes a leg later in the day; ascending flips it.
+//
+// Until a move's refetch lands, the rows on screen are not the day's real
+// order, so a further move would aim at the wrong neighbour; it is ignored
+// rather than the chevrons disabled, which would drop keyboard focus.
 async function move(f: Flight, isUp: boolean) {
+	if (store.moving) return
 	const direction = isUp === (sortDir.value === 'desc') ? 'later' : 'earlier'
 	try {
 		await store.move(f.id, direction)
@@ -243,10 +261,20 @@ function toggleAll(checked: boolean) {
 	}
 }
 
-// Esc also closes the bulk-edit dialog; that press must not clear the selection
-// it is editing.
+// Esc belongs to whatever is on top, and only an Esc nothing else took clears the
+// selection. An NcActions menu (row, sort, Add filter) and the filter editor
+// close and call preventDefault; a dialog (bulk edit, Add flight) closes without
+// it, hence the bulk-edit flag and the modal-mask check — the same test
+// @nextcloud/vue's own hotkeys use to stand aside for a modal.
 function onKeydown(e: KeyboardEvent) {
-	if (e.key === 'Escape' && (selecting.value || selectMode.value) && !bulkEditOpen.value) clearSelection()
+	if (e.key !== 'Escape' || e.defaultPrevented) return
+	if (!(selecting.value || selectMode.value) || bulkEditOpen.value || modalOpen()) return
+	clearSelection()
+}
+
+function modalOpen(): boolean {
+	return Array.from(document.getElementsByClassName('modal-mask'))
+		.some((el) => (el as HTMLElement).checkVisibility?.() ?? true)
 }
 
 const headerCount = computed(() => {
@@ -432,7 +460,18 @@ async function remove(f: Flight) {
 				</NcButton>
 			</div>
 			<NcEmptyContent
-				v-if="store.flights.length === 0"
+				v-if="store.loadError && !store.loaded"
+				class="load-error"
+				name="Could not load your flights"
+				:description="loadErrorMessage">
+				<template #action>
+					<NcButton @click="load">
+						Try again
+					</NcButton>
+				</template>
+			</NcEmptyContent>
+			<NcEmptyContent
+				v-else-if="store.flights.length === 0"
 				name="No flights yet"
 				description="Add your first flight to get started." />
 			<NcEmptyContent
@@ -459,13 +498,17 @@ async function remove(f: Flight) {
 							v-for="col in columns"
 							:key="col.key"
 							:class="{ sorted: sortKey === col.key, numeric: col.key === 'distance' }"
+							:aria-sort="sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined"
 							role="columnheader">
+							<!-- aria-sort belongs on the header cell, and only the sorted
+								 one carries it. The button repeats the direction in its
+								 name, since tabbing to it may not announce the cell's state. -->
 							<button
 								type="button"
 								class="sort-button"
-								:aria-sort="sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
 								@click="setSort(col.key)">
 								<span>{{ col.label }}</span>
+								<span v-if="sortKey === col.key" class="hidden-visually">, sorted {{ sortDir === 'asc' ? 'ascending' : 'descending' }}</span>
 								<span class="sort-indicator">
 									<MenuUp v-if="sortKey === col.key && sortDir === 'asc'" :size="16" />
 									<MenuDown v-else-if="sortKey === col.key && sortDir === 'desc'" :size="16" />

@@ -17,7 +17,8 @@ use OCA\FlightJournal\Db\AircraftTypeMapper;
  * manufacturer, model and type_designator columns must all be present.
  *
  * The import's one editorial decision is which model a bare designator resolves
- * to, recorded as `canonical`. See rankKey() for the rule and its limits.
+ * to, recorded as `canonical`. See pickCanonical() for the rule, rankKey() for
+ * its limits, and PREFERRED for the designators it is overridden on.
  */
 class AircraftTypeImportService {
 	private const SOURCE = 'csv-upload';
@@ -36,6 +37,34 @@ class AircraftTypeImportService {
 	 * Crafters' CC-11. See pickCanonical() for why filter order neutralises it.
 	 */
 	private const DERIVATIVE_MARKERS = '/\b(BBJ|ACJ|Prestige|Lineage|VIP|Elite|Challenger|CC-|UV-|P-72)/i';
+
+	/**
+	 * Designators the generic rule gets wrong, with the model a journal user
+	 * means, as [manufacturer, model] spelled as in DOC 8643. No digit rule can
+	 * fix these: every DC10 candidate's digits are "10" and every C130/C30J
+	 * candidate's "130", DH8A's lone "8" is in every Dash 8, and for B77L the
+	 * freighter's "777" is a closer digit match than "777200". So they are named.
+	 *
+	 * Consulted before the generic rule, and only when the named row is in the
+	 * file; otherwise the designator falls back to the rule, as before. Mirrored
+	 * by _PREFERRED in tests/fixtures/generate_demo_flights.py.
+	 */
+	private const PREFERRED = [
+		// The generic rule picks the shorter "777-F"; there is no B77F, so the
+		// freighter shares the designator.
+		'B77L' => ['BOEING', '777-200LR'],
+		// Generic: the military "E-9 Dash 8". DHC rather than BOMBARDIER, which
+		// carries the same model name, because DHC built the -100.
+		'DH8A' => ['DE HAVILLAND CANADA', 'DHC-8-100 Dash 8'],
+		// Generic: BOEING "MD-10", the freighter conversion, which ties on length
+		// and wins on manufacturer.
+		'DC10' => ['MCDONNELL DOUGLAS', 'DC-10'],
+		// Generic: the electronic-warfare "EC-130 Aya". DOC 8643 has no bare
+		// "C-130 Hercules"; the H is the most-built variant.
+		'C130' => ['LOCKHEED', 'C-130H Hercules'],
+		// Generic: the gunship "AC-130J Ghostrider".
+		'C30J' => ['LOCKHEED MARTIN', 'C-130J Super Hercules'],
+	];
 
 	/** @psalm-suppress PossiblyUnusedMethod */
 	public function __construct(
@@ -57,39 +86,50 @@ class AircraftTypeImportService {
 			$byDesignator[$row['type_designator']][] = $row;
 		}
 
-		$now = time();
-		$imported = 0;
-		$updated = 0;
+		// One transaction, so a failure part-way leaves the previous table intact
+		// rather than half of it re-flagged.
+		return $this->mapper->transactional(function () use ($byDesignator, $skipped): array {
+			// The file decides the default for every designator it lists. Clearing
+			// first is what demotes a stored row the file no longer has, or a
+			// previous default it now ranks lower: the loop below only ever
+			// touches the file's own rows. Designators the file does not mention
+			// are left as they are.
+			$this->mapper->clearCanonical(array_map('strval', array_keys($byDesignator)));
 
-		foreach ($byDesignator as $designator => $group) {
-			$canonicalIndex = $this->pickCanonical($group);
-			foreach ($group as $index => $row) {
-				$existing = $this->mapper->findOneByModel($row['manufacturer'], $row['model']);
-				$entity = $existing ?? new AircraftType();
-				$entity->setIcaoCode($designator);
-				$entity->setManufacturer($row['manufacturer']);
-				$entity->setModel($row['model']);
-				$key = AircraftModelKey::normalize($row['model']);
-				$entity->setModelNormalized($key === '' ? null : $key);
-				$entity->setDescription($this->nullable($row['description'] ?? null));
-				$entity->setEngineType($this->nullable($row['engine_type'] ?? null));
-				$entity->setEngineCount($this->intOrNull($row['engine_count'] ?? null));
-				$entity->setWtc($this->nullable($row['wtc'] ?? null));
-				$entity->setCanonical($index === $canonicalIndex);
-				$entity->setSource(self::SOURCE);
-				$entity->setUpdatedAt($now);
+			$now = time();
+			$imported = 0;
+			$updated = 0;
 
-				if ($existing === null) {
-					$this->mapper->insert($entity);
-					$imported++;
-				} else {
-					$this->mapper->update($entity);
-					$updated++;
+			foreach ($byDesignator as $designator => $group) {
+				$canonicalIndex = $this->pickCanonical($group);
+				foreach ($group as $index => $row) {
+					$existing = $this->mapper->findOneByModel($row['manufacturer'], $row['model']);
+					$entity = $existing ?? new AircraftType();
+					$entity->setIcaoCode($designator);
+					$entity->setManufacturer($row['manufacturer']);
+					$entity->setModel($row['model']);
+					$key = AircraftModelKey::normalize($row['model']);
+					$entity->setModelNormalized($key === '' ? null : $key);
+					$entity->setDescription($this->nullable($row['description'] ?? null));
+					$entity->setEngineType($this->nullable($row['engine_type'] ?? null));
+					$entity->setEngineCount($this->intOrNull($row['engine_count'] ?? null));
+					$entity->setWtc($this->nullable($row['wtc'] ?? null));
+					$entity->setCanonical($index === $canonicalIndex);
+					$entity->setSource(self::SOURCE);
+					$entity->setUpdatedAt($now);
+
+					if ($existing === null) {
+						$this->mapper->insert($entity);
+						$imported++;
+					} else {
+						$this->mapper->update($entity);
+						$updated++;
+					}
 				}
 			}
-		}
 
-		return ['imported' => $imported, 'updated' => $updated, 'skipped' => $skipped];
+			return ['imported' => $imported, 'updated' => $updated, 'skipped' => $skipped];
+		});
 	}
 
 	/**
@@ -165,7 +205,8 @@ class AircraftTypeImportService {
 	/**
 	 * Index of the row a bare designator should resolve to.
 	 *
-	 * Two filters narrow the group, then rankKey() sorts what survives:
+	 * A designator named in PREFERRED takes that row when the file has it.
+	 * Otherwise two filters narrow the group, then rankKey() sorts what survives:
 	 *
 	 *   1. Digit containment — the designator encodes its model number, so keep
 	 *      only models carrying it (see matchesDesignatorDigits).
@@ -184,6 +225,16 @@ class AircraftTypeImportService {
 	 * @param list<array<string, string>> $group
 	 */
 	private function pickCanonical(array $group): int {
+		$preferred = self::PREFERRED[$group[0]['type_designator']] ?? null;
+		if ($preferred !== null) {
+			foreach ($group as $index => $row) {
+				if (mb_strtolower($row['manufacturer']) === mb_strtolower($preferred[0])
+					&& mb_strtolower($row['model']) === mb_strtolower($preferred[1])) {
+					return $index;
+				}
+			}
+		}
+
 		$candidates = $this->narrow(
 			$group,
 			fn (array $row): bool => $this->matchesDesignatorDigits($row),

@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import axios from '@nextcloud/axios'
 import { generateOcsUrl } from '@nextcloud/router'
-import { showConfirmation, showError, showSuccess } from '@nextcloud/dialogs'
+import { showConfirmation, showError, showSuccess, showWarning } from '@nextcloud/dialogs'
 import { ocsErrorMessage } from '../ocsError.ts'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
@@ -104,7 +104,7 @@ async function runImport() {
 		showSuccess(`Imported ${imported} flight${imported === 1 ? '' : 's'}.`)
 		importContent.value = ''
 	} else {
-		showSuccess(`Imported ${imported}, skipped ${skipped.length}.`)
+		showWarning(`Imported ${imported}, skipped ${skipped.length}.`)
 	}
 }
 
@@ -170,7 +170,7 @@ async function runJsonImport() {
 		selectedJsonFile.value = null
 		if (jsonFileInput.value) jsonFileInput.value.value = ''
 	} else {
-		showSuccess(`Imported ${imported}, skipped ${skipped.length}.`)
+		showWarning(`Imported ${imported}, skipped ${skipped.length}.`)
 	}
 }
 
@@ -320,7 +320,7 @@ async function runExport() {
 					Import from markdown…
 				</NcButton>
 			</div>
-			<NcNoteCard v-if="lastJsonResult" type="success" class="result">
+			<NcNoteCard v-if="lastJsonResult" :type="lastJsonResult.skipped.length ? 'warning' : 'success'" class="result">
 				<p>
 					<template v-if="lastJsonResult.deleted">
 						Deleted <strong>{{ lastJsonResult.deleted }}</strong> existing flight{{ lastJsonResult.deleted === 1 ? '' : 's' }}.
@@ -338,7 +338,7 @@ async function runExport() {
 					</ul>
 				</details>
 			</NcNoteCard>
-			<NcNoteCard v-if="lastResult" type="success" class="result">
+			<NcNoteCard v-if="lastResult" :type="lastResult.skipped.length ? 'warning' : 'success'" class="result">
 				<p>
 					Imported <strong>{{ lastResult.imported }}</strong> flight{{ lastResult.imported === 1 ? '' : 's' }} from markdown.
 					Skipped <strong>{{ lastResult.skipped.length }}</strong>.

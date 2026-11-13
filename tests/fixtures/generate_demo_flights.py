@@ -111,6 +111,17 @@ def _default_aircraft_path():
 _DERIVATIVE = re.compile(r"\b(BBJ|ACJ|Prestige|Lineage|VIP|Elite|Challenger|CC-|UV-|P-72)", re.I)
 
 
+# Designators the generic rule gets wrong, named outright — must match the
+# PREFERRED table in Service/AircraftTypeImportService.php.
+_PREFERRED = {
+    "B77L": ("BOEING", "777-200LR"),
+    "DH8A": ("DE HAVILLAND CANADA", "DHC-8-100 Dash 8"),
+    "DC10": ("MCDONNELL DOUGLAS", "DC-10"),
+    "C130": ("LOCKHEED", "C-130H Hercules"),
+    "C30J": ("LOCKHEED MARTIN", "C-130J Super Hercules"),
+}
+
+
 def _digits(value):
     return re.sub(r"\D", "", value)
 
@@ -129,10 +140,16 @@ def _narrow(candidates, keep):
 def _canonical(group):
     """The model a bare designator resolves to.
 
-    Reimplements AircraftTypeImportService::pickCanonical — digit containment,
-    then derivative demotion, then shortest model, then alphabetical. Keep the
-    two in step, as with haversine_km and Service/GreatCircle.php.
+    Reimplements AircraftTypeImportService::pickCanonical — a PREFERRED row
+    when present, else digit containment, then derivative demotion, then
+    shortest model, then alphabetical. Keep the two in step, as with
+    haversine_km and Service/GreatCircle.php.
     """
+    preferred = _PREFERRED.get(group[0]["type_designator"].strip().upper())
+    if preferred:
+        for r in group:
+            if (r["manufacturer"].strip().lower(), r["model"].strip().lower()) == tuple(p.lower() for p in preferred):
+                return r
     need = _digits(group[0]["type_designator"])
     cand = _narrow(group, lambda r: not need or _is_subsequence(need, _digits(r["model"])))
     cand = _narrow(cand, lambda r: not _DERIVATIVE.search(r["model"]))

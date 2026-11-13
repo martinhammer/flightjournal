@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { showError } from '@nextcloud/dialogs'
+import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
 
 // Covers the JSON backup/restore wiring added alongside the legacy markdown
 // import/export: restore POSTs the file contents with dataformat 'json', and
@@ -48,7 +48,7 @@ const stubs = {
 	NcDialog,
 	NcTextArea,
 	NcSettingsSection: { template: '<div><slot /></div>' },
-	NcNoteCard: { template: '<div><slot /></div>' },
+	NcNoteCard: { props: ['type'], template: '<div class="note-card" :data-type="type"><slot /></div>' },
 }
 
 function switchByText(wrapper: ReturnType<typeof mount>, text: string) {
@@ -162,6 +162,26 @@ describe('PersonalSettings import failures', () => {
 		await flushPromises()
 
 		expect(showError).toHaveBeenCalledWith('Content is empty')
+	})
+
+	it('reports a restore that skipped rows as a warning, not a success', async () => {
+		post.mockResolvedValueOnce({ data: { ocs: { data: {
+			imported: 1,
+			skipped: [{ line: 2, reason: 'Seat must be at most 8 characters', raw: '{}' }],
+		} } } })
+		const wrapper = mount(PersonalSettings, { global: { stubs } })
+
+		const file = new File(['{"flights":[]}'], 'backup.json', { type: 'application/json' })
+		const input = wrapper.find('input[type="file"]')
+		Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+		await input.trigger('change')
+		await buttonByText(wrapper, 'Restore from JSON').trigger('click')
+		await flushPromises()
+
+		expect(showWarning).toHaveBeenCalledWith('Imported 1, skipped 1.')
+		expect(showSuccess).not.toHaveBeenCalled()
+		expect(wrapper.find('.note-card').attributes('data-type')).toBe('warning')
+		expect(wrapper.text()).toContain('Entry 2: Seat must be at most 8 characters')
 	})
 
 	it('falls back to a generic message when the request fails without one', async () => {

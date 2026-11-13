@@ -66,17 +66,22 @@ class SettingsApiController extends OCSController {
 	 * Export the user's flights as a downloadable file
 	 *
 	 * @param string $dataformat Export format identifier ('markdown' or 'json')
+	 * @return DataDownloadResponse<Http::STATUS_OK, string, array{}>|DataResponse<Http::STATUS_BAD_REQUEST, array{message: string}, array{}>
 	 */
 	#[NoAdminRequired]
 	#[ApiRoute(verb: 'GET', url: '/api/v1/export')]
 	#[OpenAPI(OpenAPI::SCOPE_IGNORE)]
-	public function export(string $dataformat = 'markdown'): DataDownloadResponse {
+	public function export(string $dataformat = 'markdown'): DataDownloadResponse|DataResponse {
 		if ($dataformat === 'json') {
 			$content = $this->exportService->exportJson($this->getUserId());
 			return new DataDownloadResponse($content, 'flightjournal-export.json', 'application/json');
 		}
-		$content = $this->exportService->exportMarkdownTable($this->getUserId());
-		return new DataDownloadResponse($content, 'flightjournal-export.md', 'text/markdown');
+		if ($dataformat === 'markdown') {
+			$content = $this->exportService->exportMarkdownTable($this->getUserId());
+			return new DataDownloadResponse($content, 'flightjournal-export.md', 'text/markdown');
+		}
+		// Matches import(): a typo must not download a different format that looks fine.
+		return new DataResponse(['message' => "Unsupported dataformat '$dataformat'"], Http::STATUS_BAD_REQUEST);
 	}
 
 	/**

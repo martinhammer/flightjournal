@@ -189,17 +189,30 @@ function codeLossCount(key: AirportKey): number {
 function codeLossWarning(field: FieldDef): string | null {
 	if (!isAirport(field.key)) return null
 	const kind = airportKind[field.key]
-	if (kind !== 'unmatched' && kind !== 'noReference') return null
+	if (kind !== 'unmatched' && kind !== 'noReference' && kind !== 'error') return null
 	const n = codeLossCount(field.key)
 	if (n === 0) return null
 	const subject = n === props.flights.length ? `All ${plural(n)}` : `${n} of ${plural(props.flights.length)}`
-	return `${subject} will lose their ${field.label.toLowerCase()} airport code and distance.`
+	const what = `${field.label.toLowerCase()} airport code and distance`
+	// A failed lookup can't say whether the text resolves, so the loss is only possible.
+	return kind === 'error'
+		? `The reference data could not be checked. If this text does not match an airport, ${subject.toLowerCase()} will lose their ${what}.`
+		: `${subject} will lose their ${what}.`
 }
+
+// Apply waits until each switched-on airport field's preview has settled on the
+// text now in it — the warning above is only as good as that answer. "error"
+// counts as settled (with its own warning), so an unreachable resolver can't
+// lock the dialog.
+const SETTLED: ResolutionKind[] = ['matched', 'unmatched', 'noReference', 'error']
+const airportPending = computed(() => FIELDS.some(
+	(f) => isAirport(f.key) && enabled[f.key] && !!values[f.key]?.trim() && !SETTLED.includes(airportKind[f.key]),
+))
 
 const hasChanges = computed(() => Object.keys(changes.value).length > 0)
 // The server rejects clearing a required field; say so here rather than after.
 const missingRequired = computed(() => FIELDS.some((f) => isAirport(f.key) && enabled[f.key] && !values[f.key]?.trim()))
-const canApply = computed(() => hasChanges.value && !missingRequired.value)
+const canApply = computed(() => hasChanges.value && !missingRequired.value && !airportPending.value)
 
 function close() {
 	emit('update:open', false)

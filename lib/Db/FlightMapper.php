@@ -69,30 +69,23 @@ class FlightMapper extends QBMapper {
 	}
 
 	/**
-	 * The adjacent same-day leg in day order: 'earlier' → the next-lower day_seq
-	 * (toward leg 1), 'later' → the next-higher day_seq. For a move/swap. Returns
-	 * null when the flight is already first/last in its day. Display-independent —
-	 * the view maps its up/down chevron onto these based on the active sort.
+	 * Every leg of one day in day order — day_seq, then id, which is how the
+	 * log orders a tie — locked (SELECT … FOR UPDATE) until the surrounding
+	 * transaction ends. For a move, which must see the day as it is once
+	 * nothing else can change it.
+	 *
+	 * @return list<Flight>
 	 */
-	public function findSwapNeighbor(Flight $flight, string $direction): ?Flight {
+	public function findDayForUpdate(string $userId, string $flightDate): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')
 			->from($this->getTableName())
-			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($flight->getUserId())))
-			->andWhere($qb->expr()->eq('flight_date', $qb->createNamedParameter($flight->getFlightDate())))
-			->setMaxResults(1);
-		if ($direction === 'earlier') {
-			$qb->andWhere($qb->expr()->lt('day_seq', $qb->createNamedParameter($flight->getDaySeq(), IQueryBuilder::PARAM_INT)))
-				->orderBy('day_seq', 'DESC');
-		} else {
-			$qb->andWhere($qb->expr()->gt('day_seq', $qb->createNamedParameter($flight->getDaySeq(), IQueryBuilder::PARAM_INT)))
-				->orderBy('day_seq', 'ASC');
-		}
-		try {
-			return $this->findEntity($qb);
-		} catch (DoesNotExistException) {
-			return null;
-		}
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+			->andWhere($qb->expr()->eq('flight_date', $qb->createNamedParameter($flightDate)))
+			->orderBy('day_seq', 'ASC')
+			->addOrderBy('id', 'ASC')
+			->forUpdate();
+		return $this->findEntities($qb);
 	}
 
 	/**

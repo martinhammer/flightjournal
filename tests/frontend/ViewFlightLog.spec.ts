@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 // Covers the route-query-driven filtering and the removable filter chip.
@@ -13,6 +13,8 @@ const { store, push, routeHolder } = await vi.hoisted(async () => {
 			flights: [] as unknown[],
 			loaded: true,
 			loading: false,
+			loadError: null as unknown,
+			moving: false,
 			fetchAll: vi.fn(),
 			remove: vi.fn(),
 			move: vi.fn(),
@@ -118,6 +120,10 @@ function render(options: { attachTo?: HTMLElement } = {}) {
 beforeEach(() => {
 	push.mockClear()
 	store.move.mockClear()
+	store.fetchAll.mockReset()
+	store.loaded = true
+	store.loadError = null
+	store.moving = false
 	routeHolder.query = {}
 	addFlightOpen.value = false
 	// f1 LHR→JFK, f2 JFK→LHR, f3 CPH→LHR
@@ -349,6 +355,36 @@ describe('ViewFlightLog within-day reordering', () => {
 		expect(store.move).toHaveBeenCalledWith(2, 'earlier')
 	})
 
+	it('ignores a further move until the last one has been applied', async () => {
+		// Until the refetch lands the rows on screen are not the day's real order,
+		// so a second move would aim at the wrong neighbour.
+		store.moving = true
+		const wrapper = render()
+		await reorderButtons(wrapper, 1)[0].trigger('click')
+		await wrapper.findAll('tbody tr')[1].find('.row-action.move-up').trigger('click')
+		expect(store.move).not.toHaveBeenCalled()
+		// Ignored, not disabled: disabling would drop keyboard focus mid-reorder.
+		expect(reorderButtons(wrapper, 1)[0].attributes('disabled')).toBeUndefined()
+	})
+
+	/**
+	 * ARIA allows aria-sort only on the header cell, and on one header at a time.
+	 * The button also says the direction, since a screen reader tabbing to it may
+	 * not announce the cell's state.
+	 */
+	it('marks the sorted column on its header cell, not the button', async () => {
+		const wrapper = render()
+		const sorted = () => wrapper.findAll('th[aria-sort]')
+		expect(sorted()).toHaveLength(1)
+		expect(sorted()[0].attributes('aria-sort')).toBe('descending')
+		expect(sorted()[0].find('.sort-button').text()).toBe('Date, sorted descending')
+		expect(wrapper.find('.sort-button[aria-sort]').exists()).toBe(false)
+
+		await wrapper.findAll('th .sort-button')[0].trigger('click')
+		expect(sorted()[0].attributes('aria-sort')).toBe('ascending')
+		expect(sorted()[0].find('.sort-button').text()).toBe('Date, sorted ascending')
+	})
+
 	it('flips the chevron mapping when the date sort is ascending', async () => {
 		const wrapper = render()
 		// Toggle the Date column to ascending: now the earliest leg is on top.
@@ -446,6 +482,39 @@ describe('ViewFlightLog row selection', () => {
 		await nextTick()
 		expect(wrapper.find('.filter-count').text()).toBe('3 flights')
 		wrapper.unmount()
+	})
+
+	/**
+	 * An Escape that something on top already took — an NcActions menu or the
+	 * filter editor, both of which call preventDefault — only closes that.
+	 */
+	it('keeps the selection when Escape was taken by a menu', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await rowBoxes(wrapper)[0].trigger('click')
+		const press = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+		press.preventDefault()
+		window.dispatchEvent(press)
+		await nextTick()
+		expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+		wrapper.unmount()
+	})
+
+	// A dialog (Add flight is mounted in App.vue) closes on Escape without
+	// preventDefault; an open modal mask is what says the press is the dialog's.
+	it('keeps the selection when Escape closes a dialog', async () => {
+		const wrapper = render({ attachTo: document.body })
+		await rowBoxes(wrapper)[0].trigger('click')
+		const mask = document.createElement('div')
+		mask.className = 'modal-mask'
+		document.body.appendChild(mask)
+		try {
+			window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+			await nextTick()
+			expect(wrapper.find('.filter-count').text()).toBe('3 flights · 1 selected')
+		} finally {
+			mask.remove()
+			wrapper.unmount()
+		}
 	})
 
 	it('does not open the editor when the checkbox cell is double-clicked', async () => {
@@ -750,5 +819,46 @@ describe('ViewFlightLog within-day reordering from the row menu', () => {
 		const wrapper = render()
 		expect(wrapper.find('.move-up').exists()).toBe(false)
 		expect(wrapper.find('.move-down').exists()).toBe(false)
+	})
+})
+
+describe('ViewFlightLog load failure', () => {
+	// Renders the name, description and action slot so the retry is clickable.
+	const NcEmptyContent = {
+		props: ['name', 'description'],
+		template: '<div class="empty" :data-name="name">{{ description }}<slot name="action" /></div>',
+	}
+	const mountWithEmpty = () => mount(ViewFlightLog, { global: { stubs: { ...stubs, NcEmptyContent } } })
+	const serverError = { response: { data: { ocs: { meta: { message: '' }, data: { message: 'Database unavailable' } } } } }
+
+	beforeEach(() => {
+		store.flights = []
+		store.loaded = false
+	})
+
+	it('says the load failed, with a retry, instead of "No flights yet"', async () => {
+		store.loadError = serverError
+		const wrapper = mountWithEmpty()
+		const empty = wrapper.find('.empty')
+		expect(empty.attributes('data-name')).toBe('Could not load your flights')
+		expect(empty.text()).toContain('Database unavailable')
+
+		await empty.find('.nc-button').trigger('click')
+		// Once on mount (not loaded), once for the retry.
+		expect(store.fetchAll).toHaveBeenCalledTimes(2)
+	})
+
+	it('toasts the reason the server gave when loading fails', async () => {
+		const { showError } = await import('@nextcloud/dialogs')
+		store.fetchAll.mockRejectedValueOnce(serverError)
+		mountWithEmpty()
+		await flushPromises()
+		expect(showError).toHaveBeenCalledWith('Database unavailable')
+	})
+
+	it('still reads "No flights yet" for a journal that loaded empty', () => {
+		store.loaded = true
+		const wrapper = mountWithEmpty()
+		expect(wrapper.find('.empty').attributes('data-name')).toBe('No flights yet')
 	})
 })

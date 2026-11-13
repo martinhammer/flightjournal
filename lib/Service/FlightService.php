@@ -13,6 +13,31 @@ class FlightService {
 	private const ALLOWED_CABIN_CLASSES = ['economy', 'premium_economy', 'business', 'first', 'other'];
 
 	/**
+	 * Widths of the flight's varchar columns (Version0001, Version0004), as
+	 * [label, max characters]. Checked before any write: SQLite does not enforce
+	 * VARCHAR(n), so the test suite never sees an overflow, but MySQL (strict)
+	 * and PostgreSQL reject the statement — a 500 on save, and partway through
+	 * an import.
+	 */
+	private const MAX_LENGTHS = [
+		'originCode' => ['Origin code', 8],
+		'destinationCode' => ['Destination code', 8],
+		'originLabel' => ['Origin', 128],
+		'destinationLabel' => ['Destination', 128],
+		'airlineCode' => ['Airline code', 4],
+		'flightNumber' => ['Flight number', 8],
+		'aircraftTypeCode' => ['Aircraft type code', 8],
+		'aircraftTypeRaw' => ['Aircraft type', 64],
+		'aircraftManufacturer' => ['Aircraft manufacturer', 64],
+		'aircraftModel' => ['Aircraft model', 64],
+		'registration' => ['Registration', 16],
+		'seat' => ['Seat', 8],
+	];
+
+	/** Largest value of a (signed, 32-bit) Types::INTEGER column. */
+	private const INT32_MAX = 2147483647;
+
+	/**
 	 * Fields a bulk update may set. The rest — date, seat, notes — describe one
 	 * leg, so setting them to the same value across many makes no sense.
 	 */
@@ -71,6 +96,7 @@ class FlightService {
 	 */
 	public function restore(string $userId, array $data): Flight {
 		$this->validate($data);
+		$this->validateBackupNumbers($data);
 		$flight = new Flight();
 		$flight->setUserId($userId);
 		$this->applyData($flight, $data);
@@ -224,6 +250,7 @@ class FlightService {
 		if ($hasReferenceModel && $this->str($changes, 'aircraftTypeCode') === null) {
 			throw new ValidationException('aircraftManufacturer and aircraftModel require aircraftTypeCode');
 		}
+		$this->validateLengths($changes);
 	}
 
 	/**
@@ -293,27 +320,67 @@ class FlightService {
 	 * toward leg 1 (lower day_seq), "later" away from it. The view translates its
 	 * up/down chevron into one of these based on the active sort direction.
 	 *
+	 * The day's legs are read locked and both writes share one transaction, so
+	 * two moves that overlap — a quick double click is enough, since Nextcloud
+	 * releases the session lock before the controller runs — queue up rather
+	 * than both swapping from the same stale order, and a failure between the
+	 * writes cannot leave two legs on one day_seq.
+	 *
+	 * A tie can still exist from before (a restored backup may carry duplicate
+	 * daySeq values). Tied legs could never be swapped apart, so a move that
+	 * meets one first renumbers the day 1..N in its current order.
+	 *
 	 * @param string $direction Either "earlier" or "later".
 	 */
 	public function move(int $id, string $userId, string $direction): Flight {
 		if ($direction !== 'earlier' && $direction !== 'later') {
 			throw new ValidationException('direction must be "earlier" or "later"');
 		}
-		$flight = $this->find($id, $userId);
-		$neighbor = $this->mapper->findSwapNeighbor($flight, $direction);
-		if ($neighbor === null) {
-			return $flight;
-		}
+		$date = $this->find($id, $userId)->getFlightDate();
 
-		$flightSeq = $flight->getDaySeq();
-		$flight->setDaySeq($neighbor->getDaySeq());
-		$neighbor->setDaySeq($flightSeq);
-		$now = $this->time->getTime();
-		$flight->setUpdatedAt($now);
-		$neighbor->setUpdatedAt($now);
-		$this->mapper->update($neighbor);
-		$this->mapper->update($flight);
-		return $flight;
+		return $this->mapper->transactional(function () use ($id, $userId, $date, $direction): Flight {
+			$day = $this->mapper->findDayForUpdate($userId, $date);
+			$index = null;
+			foreach ($day as $i => $leg) {
+				if ($leg->getId() === $id) {
+					$index = $i;
+				}
+			}
+			if ($index === null) {
+				// Its date was changed by a request that committed after the
+				// lookup above, so it has no neighbour on this day any more.
+				return $this->find($id, $userId);
+			}
+			$flight = $day[$index];
+			$neighborIndex = $direction === 'earlier' ? $index - 1 : $index + 1;
+			if ($neighborIndex < 0 || $neighborIndex >= count($day)) {
+				return $flight;
+			}
+			$neighbor = $day[$neighborIndex];
+
+			/** @var array<int, Flight> $changed */
+			$changed = [];
+			if ($neighbor->getDaySeq() === $flight->getDaySeq()) {
+				foreach ($day as $i => $leg) {
+					if ($leg->getDaySeq() !== $i + 1) {
+						$leg->setDaySeq($i + 1);
+						$changed[$leg->getId()] = $leg;
+					}
+				}
+			}
+			$flightSeq = $flight->getDaySeq();
+			$flight->setDaySeq($neighbor->getDaySeq());
+			$neighbor->setDaySeq($flightSeq);
+			$changed[$neighbor->getId()] = $neighbor;
+			$changed[$flight->getId()] = $flight;
+
+			$now = $this->time->getTime();
+			foreach ($changed as $leg) {
+				$leg->setUpdatedAt($now);
+				$this->mapper->update($leg);
+			}
+			return $flight;
+		});
 	}
 
 	public function delete(int $id, string $userId): void {
@@ -323,6 +390,19 @@ class FlightService {
 
 	public function deleteAll(string $userId): int {
 		return $this->mapper->deleteAllForUser($userId);
+	}
+
+	/**
+	 * Run several calls on this service as one unit: committed if $fn returns,
+	 * rolled back and rethrown if it throws. For a caller, like an import, whose
+	 * writes must land together or not at all.
+	 *
+	 * @template T
+	 * @param callable():T $fn
+	 * @return T
+	 */
+	public function transactional(callable $fn): mixed {
+		return $this->mapper->transactional($fn);
 	}
 
 	/**
@@ -510,8 +590,13 @@ class FlightService {
 		if ($date === null) {
 			throw new ValidationException('flightDate is required');
 		}
-		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+		if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $parts)) {
 			throw new ValidationException('flightDate must be YYYY-MM-DD');
+		}
+		// The shape alone lets 2026-02-31 through, which SQLite stores and a DATE
+		// column on MySQL/PostgreSQL rejects.
+		if (!checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1])) {
+			throw new ValidationException("flightDate $date is not a calendar date");
 		}
 
 		$hasOrigin = $this->str($data, 'originCode') !== null || $this->str($data, 'originLabel') !== null;
@@ -526,6 +611,42 @@ class FlightService {
 		$cabin = $this->str($data, 'cabinClass');
 		if ($cabin !== null && !in_array($cabin, self::ALLOWED_CABIN_CLASSES, true)) {
 			throw new ValidationException('Invalid cabinClass');
+		}
+		$this->validateLengths($data);
+	}
+
+	/**
+	 * Reject a value wider than its column. Measured on the trimmed value, as
+	 * stored. A label replaced by a reference airport name still fits: the
+	 * reference name column is no wider than the label's.
+	 *
+	 * @param array<array-key, mixed> $data
+	 */
+	private function validateLengths(array $data): void {
+		foreach (self::MAX_LENGTHS as $key => [$label, $max]) {
+			$value = $this->str($data, $key);
+			if ($value !== null && mb_strlen($value) > $max) {
+				throw new ValidationException("$label must be at most $max characters");
+			}
+		}
+	}
+
+	/**
+	 * Range-check the numbers only a backup carries. day_seq and distance_km
+	 * are 32-bit INTEGER columns, and a value past that range is a database
+	 * error (and with it, the whole import) rather than a skipped row. The
+	 * timestamps are BIGINT, which any PHP int fits.
+	 *
+	 * @param array<array-key, mixed> $data
+	 */
+	private function validateBackupNumbers(array $data): void {
+		$daySeq = $this->int($data, 'daySeq');
+		if ($daySeq !== null && $daySeq > self::INT32_MAX) {
+			throw new ValidationException('daySeq must be at most ' . self::INT32_MAX);
+		}
+		$distance = $this->int($data, 'distanceKm');
+		if ($distance !== null && ($distance < 0 || $distance > self::INT32_MAX)) {
+			throw new ValidationException('distanceKm must be between 0 and ' . self::INT32_MAX);
 		}
 	}
 
@@ -641,8 +762,10 @@ class FlightService {
 	 *
 	 * An explicit client-supplied code is honoured as-is together with any
 	 * manufacturer/model sent with it, which is how a JSON backup restores its
-	 * recorded type verbatim on an instance with no reference data. The SPA never
-	 * sends a code, so in practice codes always come from the resolver.
+	 * recorded type verbatim on an instance with no reference data, and how the
+	 * editor's type-ahead pick (any reference row, a designator's non-default
+	 * models included) reaches the flight. Without a pick the SPA sends no code,
+	 * and the resolver decides.
 	 *
 	 * @param array<array-key, mixed> $data
 	 * @return array{0: ?string, 1: ?string, 2: ?string, 3: ?string} [raw, code, manufacturer, model]

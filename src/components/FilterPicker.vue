@@ -137,16 +137,32 @@ function onDocumentPointerDown(event: PointerEvent) {
 	editorOpen.value = false
 }
 
+// Esc closes the editor and nothing else: preventDefault tells the Flights
+// view's own Esc (clear the selection) that this press is taken. Focus goes back
+// to the Add filter trigger if it was inside the editor, which is unmounting.
+const editorEl = ref<HTMLElement | null>(null)
+
+function onDocumentKeydown(event: KeyboardEvent) {
+	if (event.key !== 'Escape' || event.defaultPrevented || !editorOpen.value) return
+	event.preventDefault()
+	const hadFocus = editorEl.value?.contains(document.activeElement) ?? false
+	editorOpen.value = false
+	if (hadFocus) rootEl.value?.querySelector<HTMLElement>('button')?.focus()
+}
+
 watch(editorOpen, (open) => {
 	if (open) {
 		document.addEventListener('pointerdown', onDocumentPointerDown, true)
+		document.addEventListener('keydown', onDocumentKeydown)
 	} else {
 		document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+		document.removeEventListener('keydown', onDocumentKeydown)
 	}
 })
 
 onBeforeUnmount(() => {
 	document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+	document.removeEventListener('keydown', onDocumentKeydown)
 })
 
 // Opening an editor: close the picker menu, prefill staged values from the
@@ -310,7 +326,7 @@ const editorTitle = computed(() => {
 			</NcActionButton>
 		</NcActions>
 
-		<div v-if="editorOpen" class="filter-popover">
+		<div v-if="editorOpen" ref="editorEl" class="filter-popover">
 			<div class="filter-popover__title">
 				{{ editorTitle }}
 			</div>

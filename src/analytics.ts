@@ -246,7 +246,8 @@ export const DISTANCE_BINS = [
 	{ label: '1,000–2,000', below: 2000 },
 	{ label: '2,000–4,000', below: 4000 },
 	{ label: '4,000–8,000', below: 8000 },
-	{ label: '> 8,000 km', below: Infinity },
+	// ≥, not >: a bin's lower bound is inclusive (km < below), so 8,000 lands here.
+	{ label: '≥ 8,000 km', below: Infinity },
 ] as const
 
 /**
@@ -362,6 +363,12 @@ export interface RouteStat {
 	count: number
 	/** Great-circle distance; null when no leg on the route has one. */
 	distanceKm: number | null
+	/**
+	 * Distance flown on the route: the sum of its legs' own distances. A leg
+	 * without one adds nothing, as in the summary tile, so this is not
+	 * `count × distanceKm` when only some legs have a distance.
+	 */
+	totalKm: number
 }
 
 /**
@@ -379,9 +386,10 @@ export function rankRoutes(flights: Flight[]): RouteStat[] {
 		if (!f.originCode || !f.destinationCode) continue
 		const [a, b] = [f.originCode.toUpperCase(), f.destinationCode.toUpperCase()].sort()
 		const key = `${a} ${b}`
-		const route = routes.get(key) ?? { a, b, count: 0, distanceKm: null }
+		const route = routes.get(key) ?? { a, b, count: 0, distanceKm: null, totalKm: 0 }
 		route.count++
 		route.distanceKm ??= f.distanceKm
+		route.totalKm += f.distanceKm ?? 0
 		routes.set(key, route)
 	}
 	return [...routes.values()].sort((x, y) => y.count - x.count
@@ -390,16 +398,17 @@ export function rankRoutes(flights: Flight[]): RouteStat[] {
 }
 
 /**
- * Routes with a distance, ranked by distance flown on them — flights ×
- * distance — so one long haul can outrank many short hops. Ties fall back to
- * more flights, then alphabetically.
+ * Routes with a distance, ranked by distance flown on them (`totalKm`, the sum
+ * of the legs' distances — flights × distance when every leg has one), so one
+ * long haul can outrank many short hops. Ties fall back to more flights, then
+ * alphabetically. `count` still counts every leg, so a bubble's size matches
+ * what its drill-through returns.
  *
  * @param flights The flights in scope.
  */
-export function rankRoutesByDistanceFlown(flights: Flight[]): (RouteStat & { totalKm: number })[] {
+export function rankRoutesByDistanceFlown(flights: Flight[]): RouteStat[] {
 	return rankRoutes(flights)
 		.filter((r) => r.distanceKm !== null)
-		.map((r) => ({ ...r, totalKm: r.count * r.distanceKm! }))
 		.sort((x, y) => y.totalKm - x.totalKm || y.count - x.count || `${x.a} ${x.b}`.localeCompare(`${y.a} ${y.b}`))
 }
 

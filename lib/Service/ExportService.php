@@ -28,8 +28,9 @@ class ExportService {
 			$origin = $flight->getOriginCode() ?? $flight->getOriginLabel() ?? '';
 			$destination = $flight->getDestinationCode() ?? $flight->getDestinationLabel() ?? '';
 			$route = $origin !== '' || $destination !== '' ? "$origin-$destination" : '';
-			// Model-first, matching the Aircraft column in the flight log so the
-			// markdown dump reads the same as the table it mirrors.
+			// Model only, never "MANUFACTURER Model" as the Aircraft column shows it:
+			// this cell is re-imported into aircraft_type_raw, and "737-800"
+			// reconciles where "BOEING 737-800" matches no tier.
 			$type = $flight->getAircraftModel()
 				?? $flight->getAircraftTypeRaw()
 				?? $flight->getAircraftTypeCode()

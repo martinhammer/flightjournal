@@ -13,7 +13,7 @@ import AirplaneTakeoff from 'vue-material-design-icons/AirplaneTakeoff.vue'
 import SwapHorizontal from 'vue-material-design-icons/SwapHorizontal.vue'
 import MapMarker from 'vue-material-design-icons/MapMarker.vue'
 import { showError } from '@nextcloud/dialogs'
-import { listAirports } from '../api.ts'
+import { getAirportsByCodes, listAirports } from '../api.ts'
 import { useFlightsStore } from '../store/flights.ts'
 import { countByAirport } from '../flightCounts.ts'
 import type { Airport } from '../types.ts'
@@ -24,11 +24,15 @@ const store = useFlightsStore()
 
 const PAGE_SIZE = 100
 
-// Seeded from `?q=` so another view can drill through to one airport — the Map
-// view's marker popup does, sending the canonical code. Read once on setup
-// rather than watched: typing in the box deliberately does not write back to the
-// URL, so nothing can change the query while this view is mounted.
-const query = ref(String(route.query.q ?? ''))
+// `?code=` opens one airport by exact IATA/ICAO, flown or not — the Map view's
+// "View CODE details". The code is also put in the search box, so the user can
+// see what is shown and clear it; editing the box or flipping the switch ends
+// the exact lookup and goes back to the ordinary list. `?q=` just seeds the
+// box. Both are read once on setup rather than watched: typing deliberately
+// does not write back to the URL, so nothing can change the query while this
+// view is mounted.
+const exactCode = ref(String(route.query.code ?? '').trim())
+const query = ref(exactCode.value || String(route.query.q ?? ''))
 // Default: only airports the current user has flown to/from.
 const showAll = ref(false)
 const offset = ref(0)
@@ -43,7 +47,9 @@ async function fetchPage() {
 	const token = ++searchToken
 	loading.value = true
 	try {
-		const page = await listAirports(query.value, PAGE_SIZE, offset.value, !showAll.value)
+		const page = exactCode.value
+			? await exactPage(exactCode.value)
+			: await listAirports(query.value, PAGE_SIZE, offset.value, !showAll.value)
 		if (token !== searchToken) return
 		items.value = page.items
 		total.value = page.total
@@ -95,8 +101,16 @@ onMounted(async () => {
 	if (!store.loaded) await store.fetchAll()
 })
 
+// Exact on IATA or ICAO, case-insensitive (the by-codes endpoint the Map view
+// already uses for coordinates), and deliberately not limited to flown airports.
+async function exactPage(code: string): Promise<{ items: Airport[], total: number }> {
+	const found = await getAirportsByCodes([code])
+	return { items: found, total: found.length }
+}
+
 let debounce: ReturnType<typeof setTimeout> | null = null
 watch(query, () => {
+	exactCode.value = ''
 	if (debounce) clearTimeout(debounce)
 	debounce = setTimeout(() => {
 		offset.value = 0
@@ -105,6 +119,7 @@ watch(query, () => {
 })
 
 watch(showAll, () => {
+	exactCode.value = ''
 	offset.value = 0
 	fetchPage()
 })
@@ -115,6 +130,7 @@ const emptyName = computed(() => {
 })
 
 const emptyDescription = computed(() => {
+	if (exactCode.value) return `No airport with the code ${exactCode.value} in the reference data.`
 	if (query.value) return 'Try a different search term.'
 	if (showAll.value) return 'An administrator can import airport reference data from the admin settings.'
 	return 'Add flights to your log, or enable "Show all airports" to browse the full reference database.'
